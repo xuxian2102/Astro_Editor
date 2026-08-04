@@ -362,6 +362,40 @@ mod tests {
     }
 
     #[test]
+    fn fixture_smoke_readonly() {
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/test-blog");
+        let ctx = crate::services::project::open_project(&fixture).unwrap();
+
+        let ids: Vec<String> = list_posts(&ctx)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert!(ids.contains(&"hello-astro.md".to_string()));
+        assert!(ids.contains(&"nested/2026-plans.md".to_string()));
+
+        // 每篇文章拆分/重组都必须无损（含正文代码块里的 --- 行）
+        for id in &ids {
+            let doc = read_post(&ctx, id).unwrap();
+            let raw = std::fs::read_to_string(ctx.content_root.join(id)).unwrap();
+            assert_eq!(
+                join_markdown(doc.raw_frontmatter.as_deref(), &doc.body),
+                raw,
+                "{id} 拆分/重组必须无损"
+            );
+        }
+
+        let tricky = read_post(&ctx, "tricky-frontmatter.md").unwrap();
+        let fm = tricky.raw_frontmatter.unwrap();
+        assert!(fm.contains("# 这条注释必须在保存后原样保留"));
+        assert!(fm.contains("legacy_field"));
+
+        let plain = read_post(&ctx, "no-frontmatter.md").unwrap();
+        assert!(plain.raw_frontmatter.is_none());
+    }
+
+    #[test]
     fn list_skips_hidden_and_non_matching() {
         let (_dir, ctx) = ctx();
         std::fs::write(ctx.content_root.join("a.md"), "a").unwrap();
