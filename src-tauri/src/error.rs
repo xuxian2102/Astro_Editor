@@ -21,6 +21,8 @@ pub enum AppError {
     Io(String),
     #[error("Git 错误：{0}")]
     Git(String),
+    #[error("预览错误：{0}")]
+    Preview(String),
 }
 
 impl AppError {
@@ -35,6 +37,7 @@ impl AppError {
             AppError::ExternalModificationConflict => "external_modification_conflict",
             AppError::Io(_) => "io",
             AppError::Git(_) => "git",
+            AppError::Preview(_) => "preview",
         }
     }
 }

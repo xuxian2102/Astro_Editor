@@ -13,6 +13,9 @@ fn main() {
                 "rename_post",
                 "git_status",
                 "git_publish",
+                "ensure_preview_server",
+                "stop_preview_server",
+                "get_preview_status",
             ]),
         ),
     )

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ensure-preview-server"
+description = "Enables the ensure_preview_server command without any pre-configured scope."
+commands.allow = ["ensure_preview_server"]
+
+[[permission]]
+identifier = "deny-ensure-preview-server"
+description = "Denies the ensure_preview_server command without any pre-configured scope."
+commands.deny = ["ensure_preview_server"]

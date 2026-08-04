@@ -21,6 +21,7 @@ import MarkdownEditor from "./editor/MarkdownEditor";
 import Sidebar from "./components/Sidebar";
 import FrontmatterForm from "./components/FrontmatterForm";
 import GitPanel from "./components/GitPanel";
+import PreviewController from "./components/PreviewController";
 import Modal from "./components/Modal";
 
 type ModalState =
@@ -246,16 +247,19 @@ export default function App() {
             {session ? session.id : project ? "选择一篇文章" : "先打开一个博客项目"}
             {dirty && <span className="dirty-dot" title="有未保存改动" />}
           </span>
-          {session && (
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={!dirty || saving}
-              onClick={handleSave}
-            >
-              {saving ? "保存中…" : "保存 (Ctrl+S)"}
-            </button>
-          )}
+          <div className="toolbar-actions">
+            {project && <PreviewController activePostId={session?.id ?? null} />}
+            {session && (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!dirty || saving}
+                onClick={handleSave}
+              >
+                {saving ? "保存中…" : "保存 (Ctrl+S)"}
+              </button>
+            )}
+          </div>
         </header>
 
         {error && (

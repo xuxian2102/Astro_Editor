@@ -33,6 +33,8 @@ pub struct ProjectConfig {
     pub extensions: Vec<String>,
     #[serde(default)]
     pub frontmatter: FrontmatterConfig,
+    #[serde(default)]
+    pub preview: PreviewConfig,
 }
 
 impl Default for ProjectConfig {
@@ -42,6 +44,7 @@ impl Default for ProjectConfig {
             content_dir: default_content_dir(),
             extensions: default_extensions(),
             frontmatter: FrontmatterConfig::default(),
+            preview: PreviewConfig::default(),
         }
     }
 }
@@ -58,6 +61,49 @@ fn default_extensions() -> Vec<String> {
 pub struct FrontmatterConfig {
     #[serde(default)]
     pub fields: Vec<FieldSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewConfig {
+    #[serde(default = "default_preview_command")]
+    pub command: String,
+    #[serde(default = "default_preview_args")]
+    pub args: Vec<String>,
+    #[serde(default = "default_preview_host")]
+    pub host: String,
+    #[serde(default = "default_preview_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub route_template: Option<String>,
+}
+
+impl Default for PreviewConfig {
+    fn default() -> Self {
+        Self {
+            command: default_preview_command(),
+            args: default_preview_args(),
+            host: default_preview_host(),
+            port: default_preview_port(),
+            route_template: None,
+        }
+    }
+}
+
+fn default_preview_command() -> String {
+    "node_modules/.bin/astro".into()
+}
+
+fn default_preview_args() -> Vec<String> {
+    vec!["dev".into()]
+}
+
+fn default_preview_host() -> String {
+    "127.0.0.1".into()
+}
+
+fn default_preview_port() -> u16 {
+    4321
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,4 +189,31 @@ pub struct PublishResult {
     /// "stage" | "commit" | "push"，None 表示全部成功（或未尝试推送）
     pub error_stage: Option<String>,
     pub message: Option<String>,
+}
+
+/// 预览服务生命周期状态机：Stopped → Starting → Ready → Stopping → Stopped。
+/// generation 用于让后台任务能核对自己发起的这一轮启动是否还是"当前"这一轮，
+/// 防止过期的后台任务在新一轮开始后才姗姗来迟地覆盖状态。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum PreviewStatus {
+    #[default]
+    Stopped,
+    Starting {
+        generation: u64,
+        started_at_ms: u64,
+    },
+    Ready {
+        generation: u64,
+        url: String,
+        pid: u32,
+    },
+    Stopping {
+        generation: u64,
+    },
+    Failed {
+        generation: u64,
+        message: String,
+        log_tail: String,
+    },
 }

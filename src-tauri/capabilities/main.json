@@ -13,6 +13,10 @@
     "allow-create-post",
     "allow-rename-post",
     "allow-git-status",
-    "allow-git-publish"
+    "allow-git-publish",
+    "allow-ensure-preview-server",
+    "allow-stop-preview-server",
+    "allow-get-preview-status",
+    "opener:allow-open-url"
   ]
 }

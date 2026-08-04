@@ -7,11 +7,20 @@ export interface FieldSpec {
   default?: unknown;
 }
 
+export interface PreviewConfig {
+  command: string;
+  args: string[];
+  host: string;
+  port: number;
+  routeTemplate: string | null;
+}
+
 export interface ProjectConfig {
   version: number;
   contentDir: string;
   extensions: string[];
   frontmatter: { fields: FieldSpec[] };
+  preview: PreviewConfig;
 }
 
 export interface ProjectInfo {
@@ -71,6 +80,14 @@ export interface PublishResult {
   message: string | null;
 }
 
+/** 与 Rust 的 PreviewStatus 一致：Stopped → Starting → Ready → Stopping → Stopped */
+export type PreviewStatus =
+  | { phase: "stopped" }
+  | { phase: "starting"; generation: number; startedAtMs: number }
+  | { phase: "ready"; generation: number; url: string; pid: number }
+  | { phase: "stopping"; generation: number }
+  | { phase: "failed"; generation: number; message: string; logTail: string };
+
 export interface AppErrorPayload {
   code:
     | "no_project"
@@ -82,6 +99,7 @@ export interface AppErrorPayload {
     | "external_modification_conflict"
     | "io"
     | "git"
+    | "preview"
     | (string & {});
   message: string;
 }
@@ -118,4 +136,8 @@ export const api = {
   gitStatus: () => invoke<GitStatus>("git_status"),
   gitPublish: (message: string, push: boolean) =>
     invoke<PublishResult>("git_publish", { message, push }),
+  ensurePreviewServer: (postId: string | null) =>
+    invoke<PreviewStatus>("ensure_preview_server", { postId }),
+  stopPreviewServer: () => invoke<PreviewStatus>("stop_preview_server"),
+  getPreviewStatus: () => invoke<PreviewStatus>("get_preview_status"),
 };
