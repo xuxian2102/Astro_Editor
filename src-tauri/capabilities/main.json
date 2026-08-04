@@ -11,6 +11,8 @@
     "allow-read-post",
     "allow-write-post",
     "allow-create-post",
-    "allow-rename-post"
+    "allow-rename-post",
+    "allow-git-status",
+    "allow-git-publish"
   ]
 }

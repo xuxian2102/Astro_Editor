@@ -35,6 +35,42 @@ export interface PostDocument {
   revision: string;
 }
 
+export type ChangeKind =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "untracked"
+  | "unmerged";
+
+export interface FileChange {
+  path: string;
+  oldPath: string | null;
+  kind: ChangeKind;
+  staged: boolean;
+  /** 落在 contentDir 内——只有这些会被 publish 暂存 */
+  managed: boolean;
+}
+
+export interface GitStatus {
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  changes: FileChange[];
+}
+
+export interface PublishResult {
+  staged: boolean;
+  stagedFiles: string[];
+  committed: boolean;
+  commitHash: string | null;
+  pushed: boolean;
+  /** "stage" | "commit" | "push"，null 表示全部成功（或未尝试推送） */
+  errorStage: "stage" | "commit" | "push" | null;
+  message: string | null;
+}
+
 export interface AppErrorPayload {
   code:
     | "no_project"
@@ -45,6 +81,7 @@ export interface AppErrorPayload {
     | "already_exists"
     | "external_modification_conflict"
     | "io"
+    | "git"
     | (string & {});
   message: string;
 }
@@ -78,4 +115,7 @@ export const api = {
   }) => invoke<PostDocument>("create_post", args),
   renamePost: (oldId: string, newId: string) =>
     invoke<PostSummary>("rename_post", { oldId, newId }),
+  gitStatus: () => invoke<GitStatus>("git_status"),
+  gitPublish: (message: string, push: boolean) =>
+    invoke<PublishResult>("git_publish", { message, push }),
 };

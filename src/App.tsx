@@ -4,8 +4,10 @@ import {
   errorMessage,
   isAppError,
   type FieldSpec,
+  type GitStatus,
   type PostSummary,
   type ProjectInfo,
+  type PublishResult,
 } from "./lib/tauriApi";
 import {
   afterSave,
@@ -18,6 +20,7 @@ import { FrontmatterDocument } from "./domain/frontmatterDocument";
 import MarkdownEditor from "./editor/MarkdownEditor";
 import Sidebar from "./components/Sidebar";
 import FrontmatterForm from "./components/FrontmatterForm";
+import GitPanel from "./components/GitPanel";
 import Modal from "./components/Modal";
 
 type ModalState =
@@ -32,9 +35,24 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null);
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+  const [gitStatusError, setGitStatusError] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
 
   const refreshPosts = useCallback(async () => {
     setPosts(await api.listPosts());
+  }, []);
+
+  /** git_status 失败（比如项目不是 git 仓库）只在 GitPanel 里提示，不打全局 error banner */
+  const refreshGitStatus = useCallback(async () => {
+    try {
+      setGitStatus(await api.gitStatus());
+      setGitStatusError(null);
+    } catch (e) {
+      setGitStatus(null);
+      setGitStatusError(errorMessage(e));
+    }
   }, []);
 
   // dev 模式下前端热重载后从 Rust 侧恢复已打开的项目
@@ -45,10 +63,11 @@ export default function App() {
         if (p) {
           setProject(p);
           await refreshPosts();
+          await refreshGitStatus();
         }
       })
       .catch(() => {});
-  }, [refreshPosts]);
+  }, [refreshPosts, refreshGitStatus]);
 
   const run = useCallback(async (action: () => Promise<void>) => {
     setError(null);
@@ -65,7 +84,9 @@ export default function App() {
       if (!info) return; // 用户取消
       setProject(info);
       setSession(null);
+      setPublishResult(null);
       await refreshPosts();
+      await refreshGitStatus();
     });
 
   const doOpenPost = useCallback(
@@ -99,6 +120,7 @@ export default function App() {
         });
         setSession(afterSave(session, fm, revision));
         await refreshPosts();
+        await refreshGitStatus();
       } catch (e) {
         if (isAppError(e) && e.code === "external_modification_conflict") {
           setModal({ kind: "conflict" });
@@ -107,7 +129,7 @@ export default function App() {
         throw e;
       }
     }).finally(() => setSaving(false));
-  }, [session, saving, run, refreshPosts]);
+  }, [session, saving, run, refreshPosts, refreshGitStatus]);
 
   /** 冲突：放弃本地改动，重新加载磁盘内容 */
   const conflictReload = () => {
@@ -130,6 +152,7 @@ export default function App() {
       });
       setSession(afterSave(session, fm, revision));
       await refreshPosts();
+      await refreshGitStatus();
     });
   };
 
@@ -144,6 +167,7 @@ export default function App() {
         body: "\n",
       });
       await refreshPosts();
+      await refreshGitStatus();
       setSession(sessionFromDocument(doc));
     });
 
@@ -154,10 +178,24 @@ export default function App() {
       if (newId === oldId) return;
       await api.renamePost(oldId, newId);
       await refreshPosts();
+      await refreshGitStatus();
       if (session?.id === oldId) {
         setSession({ ...session, id: newId });
       }
     });
+
+  const handlePublish = useCallback(
+    (message: string, push: boolean) => {
+      if (publishing) return;
+      setPublishing(true);
+      run(async () => {
+        const result = await api.gitPublish(message, push);
+        setPublishResult(result);
+        await refreshGitStatus();
+      }).finally(() => setPublishing(false));
+    },
+    [publishing, run, refreshGitStatus],
+  );
 
   const handleBodyChange = useCallback((body: string) => {
     setSession((s) => (s ? { ...s, body, bodyDirty: true } : s));
@@ -178,17 +216,29 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar
-        project={project}
-        posts={posts}
-        activeId={session?.id ?? null}
-        onOpenProject={() => guardDirty(handleOpenProject)}
-        onOpenPost={(id) => {
-          if (id !== session?.id) guardDirty(() => void doOpenPost(id));
-        }}
-        onCreatePost={(name) => guardDirty(() => void handleCreatePost(name))}
-        onRenamePost={handleRenamePost}
-      />
+      <div className="sidebar-column">
+        <Sidebar
+          project={project}
+          posts={posts}
+          activeId={session?.id ?? null}
+          onOpenProject={() => guardDirty(handleOpenProject)}
+          onOpenPost={(id) => {
+            if (id !== session?.id) guardDirty(() => void doOpenPost(id));
+          }}
+          onCreatePost={(name) => guardDirty(() => void handleCreatePost(name))}
+          onRenamePost={handleRenamePost}
+        />
+        {project && (
+          <GitPanel
+            status={gitStatus}
+            statusError={gitStatusError}
+            publishing={publishing}
+            lastResult={publishResult}
+            onPublish={handlePublish}
+            onRefresh={() => void refreshGitStatus()}
+          />
+        )}
+      </div>
 
       <main className="main-pane">
         <header className="toolbar">

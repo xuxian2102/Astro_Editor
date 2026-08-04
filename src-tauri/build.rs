@@ -11,6 +11,8 @@ fn main() {
                 "write_post",
                 "create_post",
                 "rename_post",
+                "git_status",
+                "git_publish",
             ]),
         ),
     )

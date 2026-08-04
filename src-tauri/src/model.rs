@@ -96,3 +96,51 @@ impl ProjectContext {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Untracked,
+    Unmerged,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChange {
+    /// 相对 project root 的路径
+    pub path: String,
+    /// 仅重命名时存在
+    pub old_path: Option<String>,
+    pub kind: ChangeKind,
+    /// 变更是否已在 git 索引里（相对 HEAD）
+    pub staged: bool,
+    /// 是否落在 content_dir 内——只有这些会被 publish 暂存
+    pub managed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub changes: Vec<FileChange>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishResult {
+    pub staged: bool,
+    pub staged_files: Vec<String>,
+    pub committed: bool,
+    pub commit_hash: Option<String>,
+    pub pushed: bool,
+    /// "stage" | "commit" | "push"，None 表示全部成功（或未尝试推送）
+    pub error_stage: Option<String>,
+    pub message: Option<String>,
+}

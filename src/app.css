@@ -76,18 +76,26 @@ input {
   color: #fff;
 }
 
-/* 布局：sidebar | 编辑区 | frontmatter 面板 */
+/* 布局：sidebar 列（文章列表 + Git 面板） | 编辑区 | frontmatter 面板 */
 .app-shell {
   height: 100%;
   display: flex;
   overflow: hidden;
 }
 
-.sidebar {
+.sidebar-column {
   width: 240px;
   flex: none;
   border-right: 1px solid var(--border);
   background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -352,4 +360,160 @@ input {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.git-panel {
+  flex: none;
+  max-height: 50%;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.git-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.git-panel-header h2 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+
+.git-panel-header button {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  color: var(--fg-muted);
+}
+
+.git-hint {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+.git-branch-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: "JetBrains Mono", "Noto Sans Mono CJK SC", monospace;
+  font-size: 12px;
+}
+
+.git-ahead-behind {
+  color: var(--fg-muted);
+}
+
+.git-group h3 {
+  margin: 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.git-group-muted {
+  opacity: 0.7;
+}
+
+.git-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.git-group li {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  align-items: baseline;
+}
+
+.git-change-kind {
+  flex: none;
+  width: 3.5em;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.git-change-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-message {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+}
+
+.git-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.git-actions button {
+  flex: 1;
+}
+
+.publish-result {
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+}
+
+.publish-ok {
+  border-color: var(--accent);
+}
+
+.publish-partial {
+  border-color: var(--danger);
+}
+
+.publish-steps {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.publish-step {
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.publish-step-done {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: var(--accent);
+}
+
+.publish-step-failed {
+  background: color-mix(in srgb, var(--danger) 25%, transparent);
+  border-color: var(--danger);
+}
+
+.publish-step-skipped {
+  opacity: 0.5;
+}
+
+.publish-hash {
+  margin: 0;
+  font-family: "JetBrains Mono", "Noto Sans Mono CJK SC", monospace;
+}
+
+.publish-message {
+  margin: 4px 0 0;
+  color: var(--fg-muted);
 }

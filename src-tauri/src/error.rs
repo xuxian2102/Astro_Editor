@@ -19,6 +19,8 @@ pub enum AppError {
     ExternalModificationConflict,
     #[error("IO 错误：{0}")]
     Io(String),
+    #[error("Git 错误：{0}")]
+    Git(String),
 }
 
 impl AppError {
@@ -32,6 +34,7 @@ impl AppError {
             AppError::AlreadyExists(_) => "already_exists",
             AppError::ExternalModificationConflict => "external_modification_conflict",
             AppError::Io(_) => "io",
+            AppError::Git(_) => "git",
         }
     }
 }

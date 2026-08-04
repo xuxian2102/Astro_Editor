@@ -30,6 +30,8 @@ pub fn run() {
             commands::posts::write_post,
             commands::posts::create_post,
             commands::posts::rename_post,
+            commands::git::git_status,
+            commands::git::git_publish,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
