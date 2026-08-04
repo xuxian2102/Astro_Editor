@@ -1,6 +1,6 @@
 # Maintainer: xuxian
 pkgname=blog-editor-git
-pkgver=0.1.0.r12.gb63d59a
+pkgver=0.1.0.r13.gefc4f31
 pkgrel=1
 pkgdesc="Native Wayland Markdown editor for an Astro blog"
 arch=('x86_64')
@@ -9,11 +9,12 @@ license=('LicenseRef-All-Rights-Reserved')
 depends=(
   'cairo'
   'dbus'
-  'gcc-libs'
   'gdk-pixbuf2'
   'glib2'
   'glibc'
   'gtk3'
+  'hicolor-icon-theme'
+  'libgcc'
   'libsoup3'
   'nodejs'
   'webkit2gtk-4.1'
@@ -52,6 +53,7 @@ build() {
   export CARGO_HOME="$srcdir/cargo-home"
   export CARGO_TARGET_DIR="$srcdir/target"
   export CI=1
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/usr/src/debug/$pkgname"
 
   pnpm install --frozen-lockfile
   pnpm build

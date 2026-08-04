@@ -41,6 +41,8 @@ jobs:
             sway \
             wl-clipboard \
             dbus \
+            desktop-file-utils \
+            namcap \
             ttf-dejavu
           # Arch 给 sway 二进制附加 cap_sys_nice；GitHub 容器的 capability
           # bounding set 不含它，非 root execve 会返回 EPERM。headless pixman
@@ -61,6 +63,18 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Check Arch package metadata
+        run: |
+          bash -n packaging/arch/PKGBUILD
+          sh -n packaging/arch/blog-editor.sh
+          desktop-file-validate packaging/arch/dev.xuxian.blogeditor.desktop
+          makepkg --printsrcinfo --dir packaging/arch >/dev/null
+          namcap_result=$(namcap packaging/arch/PKGBUILD)
+          if [[ -n "$namcap_result" ]]; then
+            printf '%s\n' "$namcap_result"
+            exit 1
+          fi
 
       - name: Test frontend
         run: pnpm test
