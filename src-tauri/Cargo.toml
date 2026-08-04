@@ -9,7 +9,7 @@ rust-version = "1.88"
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]
-# 只供 Xvfb/WebKitGTK 端到端测试；默认/发布构建绝不包含 HTTP 自动化入口。
+# 只供原生 Wayland/WebKitGTK 端到端测试；默认/发布构建绝不包含 HTTP 自动化入口。
 e2e = ["dep:tauri-plugin-wdio-webdriver"]
 
 [lib]

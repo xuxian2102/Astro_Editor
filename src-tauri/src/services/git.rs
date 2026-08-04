@@ -559,27 +559,21 @@ mod tests {
 
     fn commit_all(root: &Path, message: &str) {
         run(root, &["add", "-A"]);
-        run(
-            root,
-            &[
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.com",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "-q",
-                "-m",
-                message,
-            ],
-        );
+        run(root, &["commit", "-q", "-m", message]);
     }
 
     fn init_repo() -> (tempfile::TempDir, ProjectContext) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         run(&root, &["init", "-q", "-b", "main"]);
+        // 测试仓库必须自带身份与签名策略，不能依赖开发机 ~/.gitconfig；CI 的
+        // 干净 Arch 用户没有全局身份，而 publish() 内部会执行真实 git commit。
+        run(&root, &["config", "user.name", "Blog Editor Test"]);
+        run(
+            &root,
+            &["config", "user.email", "blog-editor-test@example.invalid"],
+        );
+        run(&root, &["config", "commit.gpgsign", "false"]);
         std::fs::create_dir_all(root.join("src/content/blog")).unwrap();
         let ctx = ProjectContext {
             root: root.clone(),

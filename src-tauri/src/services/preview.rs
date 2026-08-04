@@ -791,6 +791,21 @@ mod tests {
         PathBuf::from("/bin/sh")
     }
 
+    /// `kill(pid, 0)` 对 zombie 仍返回成功。容器里的 PID 1 可能不会立即回收孤儿
+    /// zombie，因此用 /proc 状态判断“是否还在运行”，而不是判断 PID 表项是否存在。
+    fn process_is_running(pid: libc::pid_t) -> bool {
+        let stat = match std::fs::read(format!("/proc/{pid}/stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+            Err(_) => return unsafe { libc::kill(pid, 0) } == 0,
+        };
+        let state = stat
+            .windows(2)
+            .rposition(|window| window == b") ")
+            .and_then(|end| stat.get(end + 2).copied());
+        !matches!(state, Some(b'Z') | Some(b'X'))
+    }
+
     #[tokio::test]
     async fn run_startup_reaches_ready_when_server_responds() {
         let port = free_port();
@@ -919,11 +934,7 @@ mod tests {
         let grandchild_pid: libc::pid_t = line.trim().parse().expect("孙进程应打印自己的 pid");
 
         // 杀之前孙进程应该还活着
-        assert_eq!(
-            unsafe { libc::kill(grandchild_pid, 0) },
-            0,
-            "杀之前孙进程应该还活着"
-        );
+        assert!(process_is_running(grandchild_pid), "杀之前孙进程应该还活着");
 
         terminate_process_group(&mut child).await;
 
@@ -932,7 +943,7 @@ mod tests {
         // 这通常是毫秒级的，允许短暂轮询而不是要求 kill 一返回就已经消失
         let mut still_alive = true;
         for _ in 0..20 {
-            if unsafe { libc::kill(grandchild_pid, 0) } != 0 {
+            if !process_is_running(grandchild_pid) {
                 still_alive = false;
                 break;
             }
