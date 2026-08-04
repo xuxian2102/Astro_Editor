@@ -48,6 +48,7 @@ jobs:
           # bounding set 不含它，非 root execve 会返回 EPERM。headless pixman
           # compositor 不需要实时调度能力，只在这个隔离 CI 容器里移除。
           setcap -r /usr/bin/sway
+          useradd --create-home --shell /bin/bash blog-editor-ci
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -69,7 +70,9 @@ jobs:
           bash -n packaging/arch/PKGBUILD
           sh -n packaging/arch/blog-editor.sh
           desktop-file-validate packaging/arch/dev.xuxian.blogeditor.desktop
-          makepkg --printsrcinfo --dir packaging/arch >/dev/null
+          runuser --user blog-editor-ci -- \
+            makepkg --printsrcinfo --dir "$GITHUB_WORKSPACE/packaging/arch" \
+            >/dev/null
           namcap_result=$(namcap packaging/arch/PKGBUILD)
           if [[ -n "$namcap_result" ]]; then
             printf '%s\n' "$namcap_result"
@@ -102,9 +105,8 @@ jobs:
 
       - name: Test native Wayland WebKitGTK desktop
         run: |
-          useradd --create-home --shell /bin/bash blog-editor-e2e
-          runuser --user blog-editor-e2e -- \
+          runuser --user blog-editor-ci -- \
             env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
-            HOME=/home/blog-editor-e2e \
+            HOME=/home/blog-editor-ci \
             PATH="$PATH" \
             bash test/e2e/run-wayland.sh
