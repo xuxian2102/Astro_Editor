@@ -4,16 +4,26 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorMessage, type PreviewStatus } from "../lib/tauriApi";
 
 interface PreviewControllerProps {
+  projectGeneration: number;
   /** 当前打开文章的 PostId（未打开则 null）；预览会跳转到它对应的路由 */
   activePostId: string | null;
+  /** 外部 Astro 只读磁盘，因此启动/导航前必须先通过保存屏障。 */
+  beforePreview: () => Promise<boolean>;
 }
 
-export default function PreviewController({ activePostId }: PreviewControllerProps) {
+export default function PreviewController({
+  projectGeneration,
+  activePostId,
+  beforePreview,
+}: PreviewControllerProps) {
   const [status, setStatus] = useState<PreviewStatus>({ phase: "stopped" });
   const [error, setError] = useState<string | null>(null);
   const [logExpanded, setLogExpanded] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const activePostIdRef = useRef(activePostId);
   activePostIdRef.current = activePostId;
+  const projectGenerationRef = useRef(projectGeneration);
+  projectGenerationRef.current = projectGeneration;
 
   useEffect(() => {
     let disposed = false;
@@ -33,20 +43,40 @@ export default function PreviewController({ activePostId }: PreviewControllerPro
     };
   }, []);
 
-  const run = (action: () => Promise<PreviewStatus>) => {
+  const run = async (action: () => Promise<PreviewStatus>) => {
     setError(null);
-    action().catch((e) => setError(errorMessage(e)));
+    try {
+      setStatus(await action());
+    } catch (e) {
+      setError(errorMessage(e));
+    }
   };
 
-  const start = () => run(() => api.ensurePreviewServer(activePostIdRef.current));
-  const stop = () => run(() => api.stopPreviewServer());
+  const start = () => {
+    if (preparing) return;
+    setPreparing(true);
+    void (async () => {
+      try {
+        if (!(await beforePreview())) return;
+        await run(() =>
+          api.ensurePreviewServer(
+            projectGenerationRef.current,
+            activePostIdRef.current,
+          ),
+        );
+      } finally {
+        setPreparing(false);
+      }
+    })();
+  };
+  const stop = () => void run(() => api.stopPreviewServer());
 
   return (
     <div className="preview-controller">
       {error && <span className="preview-error" title={error}>⚠</span>}
       {status.phase === "stopped" && (
-        <button type="button" onClick={start}>
-          预览
+        <button type="button" onClick={start} disabled={preparing}>
+          {preparing ? "正在保存…" : "预览"}
         </button>
       )}
       {status.phase === "starting" && (
@@ -60,8 +90,8 @@ export default function PreviewController({ activePostId }: PreviewControllerPro
       )}
       {status.phase === "ready" && (
         <>
-          <button type="button" onClick={start} title={status.url}>
-            打开预览
+          <button type="button" onClick={start} title={status.url} disabled={preparing}>
+            {preparing ? "正在保存…" : "打开预览"}
           </button>
           <button type="button" onClick={() => void openUrl(status.url)}>
             在系统浏览器打开
@@ -75,7 +105,7 @@ export default function PreviewController({ activePostId }: PreviewControllerPro
       {status.phase === "failed" && (
         <div className="preview-failed">
           <span className="preview-error-text">{status.message}</span>
-          <button type="button" onClick={start}>
+          <button type="button" onClick={start} disabled={preparing}>
             重试
           </button>
           {status.logTail && (

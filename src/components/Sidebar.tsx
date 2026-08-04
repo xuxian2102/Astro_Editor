@@ -9,6 +9,7 @@ interface SidebarProps {
   onOpenPost: (id: string) => void;
   onCreatePost: (name: string) => void;
   onRenamePost: (oldId: string, newName: string) => void;
+  onDeletePost: (id: string) => void;
 }
 
 export default function Sidebar({
@@ -19,6 +20,7 @@ export default function Sidebar({
   onOpenPost,
   onCreatePost,
   onRenamePost,
+  onDeletePost,
 }: SidebarProps) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -99,17 +101,29 @@ export default function Sidebar({
                       {post.id}
                     </button>
                     {post.id === activeId && (
-                      <button
-                        type="button"
-                        className="post-rename"
-                        title="重命名"
-                        onClick={() => {
-                          setRenamingId(post.id);
-                          setRenameValue(post.id);
-                        }}
-                      >
-                        ✎
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="post-rename"
+                          title="重命名"
+                          aria-label={`重命名 ${post.id}`}
+                          onClick={() => {
+                            setRenamingId(post.id);
+                            setRenameValue(post.id);
+                          }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          className="post-delete"
+                          title="移到废纸篓"
+                          aria-label={`删除 ${post.id}`}
+                          onClick={() => onDeletePost(post.id)}
+                        >
+                          🗑
+                        </button>
+                      </>
                     )}
                   </div>
                 )}

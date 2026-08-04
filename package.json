@@ -2,6 +2,11 @@
   "name": "blog-editor",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@11.13.0",
+  "engines": {
+    "node": ">=22.12",
+    "pnpm": ">=11 <12"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,7 +22,6 @@
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.7",
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

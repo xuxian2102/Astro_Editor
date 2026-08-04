@@ -5,6 +5,8 @@ use serde::{Serialize, Serializer};
 pub enum AppError {
     #[error("当前没有打开的项目")]
     NoProject,
+    #[error("项目已经切换，请在当前文章中重试此操作")]
+    StaleProjectSession,
     #[error("项目目录无效：{0}")]
     InvalidProject(String),
     #[error("配置文件错误：{0}")]
@@ -19,6 +21,8 @@ pub enum AppError {
     ExternalModificationConflict,
     #[error("IO 错误：{0}")]
     Io(String),
+    #[error("剪贴板错误：{0}")]
+    Clipboard(String),
     #[error("Git 错误：{0}")]
     Git(String),
     #[error("预览错误：{0}")]
@@ -29,6 +33,7 @@ impl AppError {
     pub fn code(&self) -> &'static str {
         match self {
             AppError::NoProject => "no_project",
+            AppError::StaleProjectSession => "stale_project_session",
             AppError::InvalidProject(_) => "invalid_project",
             AppError::Config(_) => "config",
             AppError::InvalidPostId(_) => "invalid_post_id",
@@ -36,6 +41,7 @@ impl AppError {
             AppError::AlreadyExists(_) => "already_exists",
             AppError::ExternalModificationConflict => "external_modification_conflict",
             AppError::Io(_) => "io",
+            AppError::Clipboard(_) => "clipboard",
             AppError::Git(_) => "git",
             AppError::Preview(_) => "preview",
         }

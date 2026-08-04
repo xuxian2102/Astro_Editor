@@ -1,0 +1,71 @@
+name: Linux CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install Rust 1.88
+        run: rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test frontend
+        run: pnpm test
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo +1.88.0 fmt --check
+
+      - name: Lint Rust
+        working-directory: src-tauri
+        run: cargo +1.88.0 clippy --all-targets --all-features -- -D warnings
+
+      - name: Test Rust
+        working-directory: src-tauri
+        run: cargo +1.88.0 test
+
+      - name: Build Linux desktop binary
+        run: pnpm tauri build --no-bundle

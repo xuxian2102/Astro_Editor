@@ -75,4 +75,15 @@ describe("FrontmatterDocument", () => {
     expect(out).toContain("# 置顶注释");
     expect(out).toContain("nested: keep-me");
   });
+
+  it("clone 后编辑不会改变原 Document，并保留 YAML 表达形式", () => {
+    const original = FrontmatterDocument.parse(RAW);
+    const edited = original.clone();
+    edited.set("title", "副本标题");
+
+    expect(original.toString()).toBe(RAW);
+    expect(edited.toString()).toContain("# 置顶注释");
+    expect(edited.toString()).toContain("'single-quoted'");
+    expect(edited.getString("title")).toBe("副本标题");
+  });
 });

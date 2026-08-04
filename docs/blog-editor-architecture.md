@@ -1,5 +1,7 @@
 # 个人博客写作工具 — 架构设计
 
+当前目标平台仅为 Linux（Tauri v2 + WebKitGTK）；Windows 不在构建、运行或 CI 范围内。
+
 ## 核心原则
 
 > 主窗口是受信编辑器，预览窗口是不受信网页；Rust 是唯一的文件和 Git 权限边界；真实运行的 Astro 是最终渲染的真相来源；CodeMirror 的实时预览只负责编辑时的视觉体验，不定义、不影响实际输出。
@@ -16,6 +18,8 @@
 | Frontmatter | `yaml` 包的 `Document` API（保留注释/顺序/引号风格），不用 gray-matter |
 | 网页预览 | 按需 spawn 项目自己的 `astro dev`，独立 WebviewWindow 展示 |
 | Git | Rust 侧 `std::process::Command` 直接调系统 git，参数走数组 |
+| Markdown 结构化改写 | `pulldown-cmark` 事件流 + 源码字节范围，只改图片 URL |
+| 可恢复删除 | `trash` crate，进入 Linux 桌面环境的系统废纸篓 |
 | 打包 | `cargo tauri build`，个人使用不需要 Flatpak/AppImage 分发 |
 
 ---
@@ -50,8 +54,8 @@ fn main() {
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(
             tauri_build::AppManifest::new().commands(&[
-                "list_posts", "read_post", "write_post", "save_image",
-                "git_status", "git_stage", "git_commit", "git_push",
+                "list_posts", "read_post", "write_post", "save_image", "read_image_asset",
+                "write_draft", "read_draft", "delete_draft", "git_status", "git_publish",
                 "ensure_preview_server", "stop_preview_server",
             ]),
         ),
@@ -68,7 +72,8 @@ fn main() {
   "permissions": [
     "core:default",
     "allow-list-posts", "allow-read-post", "allow-write-post", "allow-save-image",
-    "allow-git-status", "allow-git-stage", "allow-git-commit", "allow-git-push",
+    "allow-read-image-asset", "allow-write-draft", "allow-read-draft", "allow-delete-draft",
+    "allow-git-status", "allow-git-publish",
     "allow-ensure-preview-server", "allow-stop-preview-server"
   ]
 }
@@ -99,13 +104,18 @@ my-blog-editor/
 │       │   ├── mod.rs
 │       │   ├── project.rs
 │       │   ├── posts.rs
+│       │   ├── assets.rs
+│       │   ├── drafts.rs
 │       │   ├── git.rs
 │       │   └── preview.rs
 │       └── services/                # 可单测的业务逻辑
 │           ├── mod.rs
 │           ├── project.rs           # 加载 .blog-editor.json
 │           ├── posts.rs             # 原子写、revision 校验
-│           ├── git.rs               # status/stage/commit/push
+│           ├── assets.rs            # 图片落盘、待提交登记与保守清理
+│           ├── clipboard.rs         # Linux 原生剪贴板、数量与字节预算
+│           ├── drafts.rs            # 原子恢复日志（0600）
+│           ├── git.rs               # status/publish
 │           └── preview.rs           # PreviewManager：进程组生命周期
 │
 ├── src/
@@ -117,17 +127,12 @@ my-blog-editor/
 │   ├── lib/
 │   │   └── tauriApi.ts             # 封装所有 invoke()，统一类型
 │   ├── editor/
-│   │   ├── LivePreviewEditor.tsx
-│   │   ├── livePreview.ts          # 唯一的 ViewPlugin：一次遍历、一个 DecorationSet
-│   │   ├── theme.ts
-│   │   └── decorators/
-│   │       ├── index.ts            # decoratorRegistry
-│   │       ├── heading.ts
-│   │       ├── strong.ts
-│   │       ├── emphasis.ts
-│   │       ├── inlineCode.ts
-│   │       ├── link.ts
-│   │       └── fencedCode.ts
+│   │   ├── MarkdownEditor.tsx      # 编辑器生命周期、图片输入、Compartment 模式切换
+│   │   ├── imagePaste.ts           # 粘贴/拖拽图片的纯逻辑与事务入口
+│   │   ├── livePreview.ts          # 唯一的 ViewPlugin：可见区遍历与 DecorationSet
+│   │   ├── livePreviewStructural.ts # 引用、列表、任务项、表格节点规则
+│   │   ├── livePreviewWidgets.ts    # 代码语言、列表、任务框、图片 Widget
+│   │   └── livePreview.test.ts     # 选区、IME、可见区、源码/撤销不变量
 │   └── components/
 │       ├── Sidebar.tsx
 │       ├── FrontmatterForm.tsx
@@ -176,12 +181,15 @@ struct PublishResult {
 // state.rs —— 按用途分锁，避免一把大锁堵住所有命令
 struct AppState {
     project: RwLock<Option<ProjectContext>>,
+    project_generation: AtomicU64,    // 每次切换递增，拒绝晚到的跨项目请求
+    content_lock: Mutex<()>,          // 串行化文章/资产变更，并与项目切换互斥
+    pending_assets: Mutex<PendingAssetManager>,
     preview: Mutex<PreviewManager>,
     git_lock: Mutex<()>,            // 防止并发发布
 }
 ```
 
-等 HTTP 轮询、git push、子进程退出这类耗时操作时，不持有以上任何锁。
+HTTP 轮询和预览子进程退出不跨越状态锁；Git 发布为了给 stage → commit → push 提供项目租约，会在整段操作中持有 `content_lock`，并由命令超时约束最长等待。
 
 ---
 
@@ -203,6 +211,15 @@ struct AppState {
 - 后端校验：不允许绝对路径、不允许 `..`、只接受 `.md`、解析后必须仍在 content root 内
 - 写入用临时文件 + rename，避免写到一半崩溃产生半截文件
 - 读取返回 `revision`，保存时传回 `expected_revision`；不一致时返回 `ExternalModificationConflict` 而不是静默覆盖（对应场景：git checkout 切换分支、另一个编辑器同时保存）
+- 每个项目级 IPC 都携带 `projectGeneration`；后端在 `content_lock` 内同时核对 generation 与 `ProjectContext`。前端对文章打开、文章列表、标签和 Git 状态另设 request epoch，忽略乱序返回的旧读取。
+- 保存使用不可变快照；响应回来时只推进磁盘 revision，并与当前编辑状态合并。保存期间新增的正文或 Frontmatter 继续保持 dirty。CodeMirror 的 editor epoch 与 revision 分离，普通保存不会重建编辑器或清空 undo。
+
+### 2.1 自动恢复与关闭保护
+
+- dirty 内容以 700ms 防抖写入 Tauri app-data 下的项目/文章隔离草稿，文件采用同目录临时文件、`sync_all`、原子替换与 `0600` 权限。
+- 草稿写入与删除走同一前端队列；正文保存成功后排队删除，避免迟到写入把已保存草稿重新复活。
+- 再次打开文章时比较草稿内容、`baseRevision` 与最新磁盘文档：相同则静默清理；不同则让用户选择恢复草稿或使用磁盘版本，磁盘已变化时明确告警。
+- 正常关闭时若文字、图片导入或保存仍未完成，会阻止窗口退出并提供保存/放弃选择。
 
 ### 3. 预览：独立窗口 + 进程组管理 + 就绪轮询 + 路由模板
 
@@ -211,24 +228,41 @@ struct AppState {
 - 用 `CommandExt::process_group`（Unix）把 astro dev 放进独立进程组，停止预览/切换项目/应用退出时对整个进程组发信号，避免 npm/pnpm 包一层导致杀不干净
 - spawn 后不立刻打开页面，轮询 `http://127.0.0.1:PORT/` 直到可访问、子进程提前退出、或超时
 - 文件路径不能直接推出 URL（Content Collections、自定义 slug、i18n 都会打破这个假设），路由映射走配置里的 `routeTemplate`
+- 默认文件 slug 与 Astro 5 `glob()` loader 一致：逐路径段走 GitHub slugger，并优先采用 frontmatter 的 `slug`；资产目录仍保留真实文件名大小写，不能与 URL slug 共用转换函数
 
-### 4. Git：拆分步骤 + 结构化结果
+### 4. Git：事务化发布 + 结构化结果
 
-后端拆成 `git_status` / `git_stage` / `git_commit` / `git_push`，UI 上可以只保留"提交"和"提交并推送"两个按钮，但底层分开调用，返回 `PublishResult` 而不是简单的成功/失败——commit 成功但 push 失败是真实会发生的场景，不能笼统报错导致用户重复提交。
+后端暴露 `git_status` 与一次事务化的 `git_publish`；`git_publish` 内部仍按 stage → commit → 可选 push 分步执行，并返回 `PublishResult`。commit 成功但 push 失败会如实呈现，不能笼统报错导致用户重复提交。
 
-- 第一版只 stage 编辑器管理的文章和图片，不静默执行 `git add .`
+- 第一版只 stage 编辑器管理的文章、图片和 `.blog-editor.json`，不静默执行 `git add .`
 - 设置 `GIT_TERMINAL_PROMPT=0`，避免图形界面下 git 卡在凭证输入
-- `git_lock` 防止并发发布
+- `content_lock` 让发布与文章、图片和项目切换互斥，`git_lock` 防止并发发布；存在 pending 图片或任何 unmerged 项时，在修改 index 前硬阻断
 
-### 5. 实时预览：单次遍历 + 不变量
+### 5. 图片资产：待提交事务 + 结构化重命名 + 可恢复删除
 
-核心是一个 `ViewPlugin`，文档/光标/可见区域变化时重新计算一次 `syntaxTree` 遍历，所有装饰写进同一个 `DecorationSet`，`decoratorRegistry` 按节点类型分发（heading → strong → emphasis → inlineCode → link → fencedCode 的开发顺序不变，链接和代码块逻辑最复杂，放最后）。
+图片粘贴天然跨两个动作：先把二进制文件落盘，再把 Markdown 引用插进编辑器。不能假设第二步必然保存，因此 Rust 侧维护一个仅属于当前应用会话的 `PendingAssetManager`：
+
+1. 前端先读取标准 `ClipboardEvent`；WebKitGTK 隐藏图片数据或文件管理器只给 URI MIME 时，`import_clipboard_images` 在 blocking worker 中绕开 WebKit。文件列表由 `arboard` 读取，Wayland 原始位图按 compositor 实际提供的 `image/*` MIME 由 `wl-clipboard-rs` 读取，避免只请求 `image/png` 的兼容性缺口。
+2. `save_image` 使用原始二进制 IPC，并以同目录临时文件 + `persist_noclobber` 写入 `<文章 stem>/<文件名>`；单张限制 25 MiB、批量限制 20 张/100 MiB。它记录新建文件的规范路径和内容哈希；命中相同内容时复用现有文件，但不取得其所有权。
+3. `write_post` 成功后按磁盘正文对账：已被图片节点引用的文件解除待提交标记，撤销后没有引用的文件删除。
+4. 放弃编辑、切换项目和正常退出时执行同一套保守清理；文件内容被外部改过或磁盘正文已经引用时一律保留。
+5. 重命名先校验 revision，再用 `pulldown-cmark` 的图片事件与源码范围只改图片目标，代码块、普通链接、alt/title 和 frontmatter 保持原字节；只移动正文直接引用且位于同名目录的图片，目录内其他文件和嵌套文章原地保留。
+6. 删除再次校验 revision，只把文章及其直接引用的同目录图片送入系统废纸篓，不把“同 stem 目录”推断成整篇文章所有，也不做永久递归删除。
+7. 编辑器内嵌图片通过 `read_image_asset` 读取原始字节：目标必须相对当前文章，percent decode 和 canonicalize 后仍在 `content_root` 内，且扩展名和 25 MiB 上限通过验证；不启用宽泛的 asset protocol 文件系统 scope。
+
+`a.md` 与 `a/nested.md` 可以同时存在，此时 `a/` 既可能容纳图片，也可能是内容层级，永远不视为 `a.md` 独占目录。所有权按 Markdown AST 中的直接图片引用逐文件计算。
+
+### 6. 实时预览：单次遍历 + 不变量
+
+核心是一个 `ViewPlugin`，文档/光标/可见区域或 Lezer 后台语法树变化时，只遍历 `visibleRanges` 内的 `syntaxTree`；所有视觉装饰写进同一个 `DecorationSet`。被隐藏的语法标记另生成一个只供 `atomicRanges` 使用的集合，避免方向键落进视觉上的零宽区域。异步图片使用最多 64 项的 LRU Blob URL 缓存；淘汰和插件销毁都会 revoke。
+
+编辑器用 CodeMirror `Compartment` 在“实时排版”和“源码显示”之间热切换，不重建 `EditorState`，因此正文、选区和 undo 历史都保留。当前已完成 heading、strong、emphasis、inlineCode、link、fencedCode、单行 image、blockquote、bullet/ordered list、task list 与 GFM table；图片字节异步加载后通过 Blob URL 缓存，插件销毁时统一 revoke，加载完成会通知 CodeMirror 重新测量布局。任务复选框是显式编辑动作，只替换 `TaskMarker` 中间的一个字符，因此正常进入 dirty 与 undo 历史。
 
 需要作为验收标准的不变量：
 
-1. 装饰永远不修改源 Markdown
+1. 装饰计算永远不修改源 Markdown；只有用户点击任务复选框时执行显式源码事务
 2. 光标/选区与语法节点相交时恢复原始符号
-3. **输入法组合期间不替换当前编辑节点**（中文输入法在 Wayland 下的 composition 事件容易被装饰器打断，第一批就要测）
+3. **输入法组合期间不替换当前编辑节点**；`compositionend` 延迟到下一帧并再次确认 CodeMirror 已结束组合，兼容 WebKitGTK 最后一批 DOM mutation 晚到的情况
 4. 复制内容是 Markdown 原文，不是渲染后的视觉文本
 5. Undo/redo 不受装饰影响
 6. 只处理 `visibleRanges`，不对整篇文档跑遍历
@@ -270,6 +304,10 @@ struct AppState {
 
 保留 `version` 字段，方便以后配置结构变化时做迁移。
 
+项目设置面板只提交结构化 `ProjectConfig`，不接收任意文件路径或原始 JSON。打开项目与保存设置共用同一套 Rust 校验；保存前先完整验证，随后在项目根目录创建同权限临时文件、`sync_all` 并原子替换 `.blog-editor.json`，最后从磁盘重新加载到 `AppState`。写入时合并当前版本不认识的对象键，避免插件或未来版本的扩展配置被静默删除。
+
+第一版允许编辑文章扩展名、预览命令/参数/端口/路由模板以及 Frontmatter 字段；`contentDir`、资产模式和固定监听地址 `127.0.0.1` 只读。配置保存成功后取消旧预览进程，当前文章编辑会话和未保存正文保持不变。
+
 ---
 
 ## 开发阶段
@@ -287,8 +325,11 @@ PreviewManager、独立无权限的 preview 窗口、绑定 127.0.0.1、就绪�
 
 **阶段 4：图片、标签、设置**
 图片粘贴/拖拽、文件名冲突处理、标签索引与自动补全、项目配置 UI、删除文章及资产确认。
+当前检查点：图片粘贴/拖拽（含 WebKitGTK 原生兜底）、待提交清理、标签索引、重命名资产改写、可恢复删除、项目配置 UI、保存屏障、关闭/草稿恢复，以及实时排版核心节点和结构化块（引用、列表、任务项、表格）均已完成；下一批可补齐删除线、自动链接、分隔线与 Setext 标题。
+
+Linux CI 固定 Node 22、pnpm 11 与 Rust 1.88，执行前端测试/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试和 `tauri build --no-bundle`。
 
 **阶段 5：Obsidian 式实时预览**
-heading → strong → emphasis → inlineCode → link → fencedCode，IME/选区/复制/撤销测试作为验收的一部分，不是事后补充。
+heading → strong → emphasis → inlineCode → link → fencedCode → image → blockquote/list/task/table，IME/选区/复制/撤销测试作为验收的一部分，不是事后补充。
 
 即使实时预览最后没按期完成，前四个阶段已经是一个完整可用的工具。

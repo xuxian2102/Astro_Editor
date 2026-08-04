@@ -29,5 +29,8 @@ export function changeLabel(kind: ChangeKind): string {
 }
 
 export function canPublish(status: GitStatus): boolean {
-  return groupChanges(status).managed.length > 0;
+  return (
+    !status.changes.some((change) => change.kind === "unmerged") &&
+    groupChanges(status).managed.length > 0
+  );
 }

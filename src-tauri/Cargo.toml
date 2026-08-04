@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "个人博客写作工具"
 authors = ["xuxian"]
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 [lib]
 name = "blog_editor_lib"
@@ -18,7 +18,6 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-clipboard-manager = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
@@ -26,6 +25,25 @@ thiserror = "2"
 sha2 = "0.10"
 tempfile = "3"
 serde_yaml = "0.9"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+percent-encoding = "2.3"
+# 直接读原生剪贴板：除位图外还支持文件管理器复制的图片路径。
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+infer = "0.19"
+# Astro 的默认 glob loader 使用 github-slugger 生成 Content Entry ID；预览路由必须
+# 使用同一种规则，不能直接拿大小写敏感的磁盘文件名拼 URL。
+github-slugger = "0.1.0"
+# arboard 返回 RGBA 像素；统一编码成 PNG 后交给现有资产服务。
+png = "0.17.16"
+# 固定 image 补丁版本，避免剪贴板依赖在无关更新中漂移；这里只启用 PNG 解码。
+image = { version = "=0.25.5", default-features = false, features = ["png"] }
+# 固定 4.x，避免系统废纸篓行为随主版本更新变化。
+trash = "=4.1.1"
 tokio = { version = "1", features = ["process", "time", "net", "sync", "macros", "rt", "rt-multi-thread", "io-util"] }
 tokio-util = "0.7"
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# arboard 的 Wayland 图片读取只请求 image/png；这里按 compositor 实际提供的
+# image/* MIME 读取 JPEG/WebP/AVIF 等格式。
+wl-clipboard-rs = "0.9.3"

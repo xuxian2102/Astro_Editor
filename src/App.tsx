@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   api,
   errorMessage,
   isAppError,
+  type DraftDocument,
   type FieldSpec,
   type GitStatus,
+  type PostDocument,
   type PostSummary,
+  type ProjectConfig,
   type ProjectInfo,
   type PublishResult,
 } from "./lib/tauriApi";
 import {
   afterSave,
+  createSaveSnapshot,
+  draftMatchesDocument,
+  editorSessionKey,
   isDirty,
-  serializeFrontmatter,
+  sessionFromDraft,
   sessionFromDocument,
+  type PostSaveSnapshot,
   type PostSession,
 } from "./domain/postSession";
 import { FrontmatterDocument } from "./domain/frontmatterDocument";
@@ -23,32 +31,253 @@ import FrontmatterForm from "./components/FrontmatterForm";
 import GitPanel from "./components/GitPanel";
 import PreviewController from "./components/PreviewController";
 import Modal from "./components/Modal";
+import ProjectSettingsDialog from "./components/ProjectSettingsDialog";
 
 type ModalState =
   | { kind: "conflict" }
-  | { kind: "discard"; next: () => void };
+  | { kind: "close" }
+  | {
+      kind: "recovery";
+      document: PostDocument;
+      draft: DraftDocument;
+      editorEpoch: number;
+      projectGeneration: number;
+    }
+  | {
+      kind: "discard";
+      postId: string;
+      projectGeneration: number;
+      next: (fresh?: PostDocument) => void | Promise<void>;
+    }
+  | {
+      kind: "delete";
+      id: string;
+      expectedRevision: string;
+      projectGeneration: number;
+      hasUnsavedChanges: boolean;
+    };
+
+type SessionUpdate =
+  | PostSession
+  | null
+  | ((current: PostSession | null) => PostSession | null);
 
 export default function App() {
-  const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [project, setRenderedProject] = useState<ProjectInfo | null>(null);
+  const projectRef = useRef<ProjectInfo | null>(null);
+  projectRef.current = project;
+  const setProject = useCallback((next: ProjectInfo | null) => {
+    projectRef.current = next;
+    setRenderedProject(next);
+  }, []);
   const [posts, setPosts] = useState<PostSummary[]>([]);
-  const [session, setSession] = useState<PostSession | null>(null);
-  /** 重载同一篇文章时也要重建编辑器，所以带上 revision */
+  const [session, setRenderedSession] = useState<PostSession | null>(null);
+  // React state 负责渲染，ref 负责异步操作完成当下读取最新编辑内容，避免闭包旧值。
+  const sessionRef = useRef<PostSession | null>(null);
+  const editorEpochRef = useRef(0);
+  const setSession = useCallback((update: SessionUpdate) => {
+    const next =
+      typeof update === "function" ? update(sessionRef.current) : update;
+    sessionRef.current = next;
+    setRenderedSession(next);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+  const saveRequestRef = useRef(0);
+  const saveRequiresCleanRef = useRef(false);
+  const pendingImageOperationsRef = useRef(new Set<Promise<unknown>>());
+  const postOpenRequestRef = useRef(0);
+  const postsRefreshRequestRef = useRef(0);
+  const tagsRefreshRequestRef = useRef(0);
+  const gitRefreshRequestRef = useRef(0);
+  const [pendingImageCount, setPendingImageCount] = useState(0);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [gitStatusError, setGitStatusError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [tagSuggestions, setTagSuggestions] = useState<Record<string, string[]>>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [livePreviewEnabled, setLivePreviewEnabled] = useState(true);
+  const draftTimerRef = useRef<number | null>(null);
+  const draftQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const cancelScheduledDraft = useCallback(() => {
+    if (draftTimerRef.current === null) return;
+    window.clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = null;
+  }, []);
+
+  /** 草稿写入和删除严格排队，保证正常保存后的 delete 不会被旧写入反超。 */
+  const enqueueDraftOperation = useCallback(<T,>(action: () => Promise<T>) => {
+    const result = draftQueueRef.current.then(action, action);
+    draftQueueRef.current = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }, []);
+
+  const waitForDraftQueue = useCallback(
+    () => draftQueueRef.current,
+    [],
+  );
+
+  const loadSession = useCallback(
+    async (document: PostDocument, recoverDraft = true) => {
+      editorEpochRef.current += 1;
+      const editorEpoch = editorEpochRef.current;
+      const projectGeneration = projectRef.current?.generation ?? 0;
+      setModal((current) =>
+        current?.kind === "recovery" ? null : current,
+      );
+      setSession(
+        sessionFromDocument(document, editorEpoch, projectGeneration),
+      );
+
+      if (!recoverDraft || projectGeneration === 0) return;
+      try {
+        const draft = await enqueueDraftOperation(() =>
+          api.readDraft(projectGeneration, document.id),
+        );
+        const current = sessionRef.current;
+        if (
+          !current ||
+          current.id !== document.id ||
+          current.editorEpoch !== editorEpoch ||
+          current.projectGeneration !== projectGeneration ||
+          current.editVersion !== 0
+        ) {
+          return;
+        }
+        if (!draft) return;
+        if (draftMatchesDocument(draft, document)) {
+          await enqueueDraftOperation(() =>
+            api.deleteDraft(projectGeneration, document.id),
+          );
+          return;
+        }
+        setModal((currentModal) =>
+          currentModal ?? {
+            kind: "recovery",
+            document,
+            draft,
+            editorEpoch,
+            projectGeneration,
+          },
+        );
+      } catch (e) {
+        if (isAppError(e) && e.code === "stale_project_session") return;
+        setError(`读取自动恢复草稿失败：${errorMessage(e)}`);
+      }
+    },
+    [enqueueDraftOperation, setSession],
+  );
+
+  useEffect(() => {
+    cancelScheduledDraft();
+    if (!session || !isDirty(session)) return;
+
+    const snapshot = createSaveSnapshot(session);
+    const timer = window.setTimeout(() => {
+      if (draftTimerRef.current === timer) draftTimerRef.current = null;
+      const operation = enqueueDraftOperation(() =>
+        api.writeDraft({
+          projectGeneration: snapshot.projectGeneration,
+          postId: snapshot.id,
+          rawFrontmatter: snapshot.rawFrontmatter,
+          body: snapshot.body,
+          baseRevision: snapshot.expectedRevision,
+        }),
+      );
+      void operation.catch((e) => {
+        if (isAppError(e) && e.code === "stale_project_session") return;
+        const current = sessionRef.current;
+        if (
+          current?.id === snapshot.id &&
+          current.projectGeneration === snapshot.projectGeneration
+        ) {
+          setError((existing) =>
+            existing ?? `自动草稿保存失败：${errorMessage(e)}`,
+          );
+        }
+      });
+    }, 700);
+    draftTimerRef.current = timer;
+
+    return () => {
+      if (draftTimerRef.current === timer) {
+        window.clearTimeout(timer);
+        draftTimerRef.current = null;
+      }
+    };
+  }, [cancelScheduledDraft, enqueueDraftOperation, session]);
+
+  const registerImageOperation = useCallback((operation: Promise<unknown>) => {
+    const operations = pendingImageOperationsRef.current;
+    if (operations.has(operation)) return;
+    operations.add(operation);
+    setPendingImageCount(operations.size);
+
+    const finish = () => {
+      operations.delete(operation);
+      setPendingImageCount(operations.size);
+    };
+    operation.then(finish, finish);
+  }, []);
+
+  const waitForPendingImages = useCallback(async () => {
+    // 一个操作收尾时可能同步登记下一项，所以直到集合真正为空才返回。
+    while (pendingImageOperationsRef.current.size > 0) {
+      await Promise.allSettled([...pendingImageOperationsRef.current]);
+    }
+  }, []);
 
   const refreshPosts = useCallback(async () => {
-    setPosts(await api.listPosts());
+    const request = ++postsRefreshRequestRef.current;
+    const currentProject = projectRef.current;
+    if (!currentProject) {
+      setPosts([]);
+      return;
+    }
+    const generation = currentProject.generation;
+    try {
+      const nextPosts = await api.listPosts(generation);
+      if (
+        request === postsRefreshRequestRef.current &&
+        projectRef.current?.generation === generation
+      ) {
+        setPosts(nextPosts);
+      }
+    } catch (e) {
+      if (
+        request === postsRefreshRequestRef.current &&
+        projectRef.current?.generation === generation
+      ) {
+        throw e;
+      }
+    }
   }, []);
 
   const refreshTags = useCallback(async () => {
+    const request = ++tagsRefreshRequestRef.current;
+    const currentProject = projectRef.current;
+    if (!currentProject) {
+      setTagSuggestions({});
+      return;
+    }
+    const generation = currentProject.generation;
     try {
-      setTagSuggestions(await api.listTags());
+      const suggestions = await api.listTags(generation);
+      if (
+        request === tagsRefreshRequestRef.current &&
+        projectRef.current?.generation === generation
+      ) {
+        setTagSuggestions(suggestions);
+      }
     } catch {
       // 标签索引只是辅助功能，读取失败不打断主流程
     }
@@ -56,12 +285,31 @@ export default function App() {
 
   /** git_status 失败（比如项目不是 git 仓库）只在 GitPanel 里提示，不打全局 error banner */
   const refreshGitStatus = useCallback(async () => {
-    try {
-      setGitStatus(await api.gitStatus());
-      setGitStatusError(null);
-    } catch (e) {
+    const request = ++gitRefreshRequestRef.current;
+    const currentProject = projectRef.current;
+    if (!currentProject) {
       setGitStatus(null);
-      setGitStatusError(errorMessage(e));
+      setGitStatusError(null);
+      return;
+    }
+    const generation = currentProject.generation;
+    try {
+      const status = await api.gitStatus(generation);
+      if (
+        request === gitRefreshRequestRef.current &&
+        projectRef.current?.generation === generation
+      ) {
+        setGitStatus(status);
+        setGitStatusError(null);
+      }
+    } catch (e) {
+      if (
+        request === gitRefreshRequestRef.current &&
+        projectRef.current?.generation === generation
+      ) {
+        setGitStatus(null);
+        setGitStatusError(errorMessage(e));
+      }
     }
   }, []);
 
@@ -91,6 +339,10 @@ export default function App() {
 
   const handleOpenProject = () =>
     run(async () => {
+      postOpenRequestRef.current += 1;
+      await waitForPendingImages();
+      cancelScheduledDraft();
+      await waitForDraftQueue();
       const info = await api.selectProject();
       if (!info) return; // 用户取消
       setProject(info);
@@ -104,78 +356,274 @@ export default function App() {
   const doOpenPost = useCallback(
     (id: string) =>
       run(async () => {
-        setSession(sessionFromDocument(await api.readPost(id)));
+        const request = ++postOpenRequestRef.current;
+        await waitForPendingImages();
+        const current = sessionRef.current;
+        const projectGeneration =
+          current?.projectGeneration ?? projectRef.current?.generation;
+        if (projectGeneration === undefined) return;
+        if (current && current.id !== id) {
+          await api.discardPendingImages(
+            current.projectGeneration,
+            current.id,
+          );
+        }
+        const document = await api.readPost(projectGeneration, id);
+        if (
+          request !== postOpenRequestRef.current ||
+          projectRef.current?.generation !== projectGeneration
+        ) {
+          return;
+        }
+        await loadSession(document);
       }),
-    [run],
+    [loadSession, run, waitForPendingImages],
   );
 
   /** 有未保存改动时先经确认弹窗 */
-  const guardDirty = (next: () => void) => {
-    if (session && isDirty(session)) {
-      setModal({ kind: "discard", next });
+  const guardDirty = (
+    next: (fresh?: PostDocument) => void | Promise<void>,
+  ) => {
+    if (
+      session &&
+      (isDirty(session) || pendingImageOperationsRef.current.size > 0)
+    ) {
+      setModal({
+        kind: "discard",
+        postId: session.id,
+        projectGeneration: session.projectGeneration,
+        next,
+      });
     } else {
-      next();
+      void next();
     }
   };
 
-  const handleSave = useCallback(() => {
-    if (!session || saving) return;
-    setSaving(true);
-    run(async () => {
-      const fm = serializeFrontmatter(session);
+  const writeSnapshot = useCallback(
+    async (snapshot: PostSaveSnapshot, expectedRevision: string) => {
+      const revision = await api.writePost({
+        projectGeneration: snapshot.projectGeneration,
+        id: snapshot.id,
+        rawFrontmatter: snapshot.rawFrontmatter,
+        body: snapshot.body,
+        expectedRevision,
+      });
+      setSession((current) =>
+        current?.id === snapshot.id
+          ? afterSave(current, snapshot, revision)
+          : current,
+      );
       try {
-        const revision = await api.writePost({
-          id: session.id,
-          rawFrontmatter: fm,
-          body: session.body,
-          expectedRevision: session.revision,
-        });
-        setSession(afterSave(session, fm, revision));
-        await refreshPosts();
-        await refreshGitStatus();
-        await refreshTags();
-      } catch (e) {
-        if (isAppError(e) && e.code === "external_modification_conflict") {
-          setModal({ kind: "conflict" });
-          return;
-        }
-        throw e;
+        await enqueueDraftOperation(() =>
+          api.deleteDraft(snapshot.projectGeneration, snapshot.id),
+        );
+      } catch {
+        // 正文已经落盘，草稿清理失败不能把一次成功保存伪装成冲突；下次打开会再次清理。
       }
-    }).finally(() => setSaving(false));
-  }, [session, saving, run, refreshPosts, refreshGitStatus, refreshTags]);
+      await Promise.allSettled([
+        refreshPosts(),
+        refreshGitStatus(),
+        refreshTags(),
+      ]);
+    },
+    [
+      enqueueDraftOperation,
+      refreshGitStatus,
+      refreshPosts,
+      refreshTags,
+      setSession,
+    ],
+  );
+
+  const requestSave = useCallback((requireClean: boolean): Promise<boolean> => {
+    saveRequestRef.current += 1;
+    if (requireClean) saveRequiresCleanRef.current = true;
+    if (saveInFlightRef.current) return saveInFlightRef.current;
+
+    setSaving(true);
+    setError(null);
+    const operation = (async () => {
+      while (true) {
+        const handledRequest = saveRequestRef.current;
+        await waitForPendingImages();
+        cancelScheduledDraft();
+        const current = sessionRef.current;
+        if (!current || !isDirty(current)) return true;
+        const snapshot = createSaveSnapshot(current);
+
+        try {
+          await writeSnapshot(snapshot, snapshot.expectedRevision);
+        } catch (e) {
+          if (isAppError(e) && e.code === "external_modification_conflict") {
+            setModal({ kind: "conflict" });
+            return false;
+          }
+          setError(errorMessage(e));
+          return false;
+        }
+
+        const latest = sessionRef.current;
+        const anotherSaveWasRequested =
+          saveRequestRef.current !== handledRequest;
+        const barrierStillDirty =
+          saveRequiresCleanRef.current && !!latest && isDirty(latest);
+        if (!anotherSaveWasRequested && !barrierStillDirty) return true;
+      }
+    })();
+    saveInFlightRef.current = operation;
+    void operation.finally(() => {
+      if (saveInFlightRef.current === operation) {
+        saveInFlightRef.current = null;
+        saveRequiresCleanRef.current = false;
+      }
+      setSaving(false);
+    });
+    return operation;
+  }, [cancelScheduledDraft, waitForPendingImages, writeSnapshot]);
+
+  const handleSave = useCallback(() => {
+    void requestSave(false);
+  }, [requestSave]);
+
+  /** 预览/发布的保存屏障：返回 true 时保证 pending 图片已完成且当前文章是 clean。 */
+  const ensureSaved = useCallback(
+    () => requestSave(true),
+    [requestSave],
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        const current = sessionRef.current;
+        const hasWork =
+          !!current &&
+          (isDirty(current) ||
+            pendingImageOperationsRef.current.size > 0 ||
+            saveInFlightRef.current !== null);
+        if (!hasWork) return;
+        event.preventDefault();
+        setModal({ kind: "close" });
+      })
+      .then((dispose) => {
+        if (disposed) dispose();
+        else unlisten = dispose;
+      })
+      .catch(() => {
+        // 普通浏览器开发模式没有 Tauri 窗口事件；桌面构建中会正常注册。
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const saveAndClose = () => {
+    setModal(null);
+    void (async () => {
+      if (await ensureSaved()) await getCurrentWindow().destroy();
+    })();
+  };
+
+  const discardAndClose = () => {
+    setModal(null);
+    void (async () => {
+      await waitForPendingImages();
+      cancelScheduledDraft();
+      await waitForDraftQueue();
+      const current = sessionRef.current;
+      if (current) {
+        try {
+          await enqueueDraftOperation(() =>
+            api.deleteDraft(current.projectGeneration, current.id),
+          );
+          await api.discardPendingImages(
+            current.projectGeneration,
+            current.id,
+          );
+        } catch {
+          // 用户已明确选择放弃；退出时 Rust 仍会再次尽力清理 pending 图片。
+        }
+      }
+      await getCurrentWindow().destroy();
+    })();
+  };
 
   /** 冲突：放弃本地改动，重新加载磁盘内容 */
   const conflictReload = () => {
+    postOpenRequestRef.current += 1;
     setModal(null);
-    if (session) void doOpenPost(session.id);
+    const current = sessionRef.current;
+    if (!current) return;
+    const postId = current.id;
+    const projectGeneration = current.projectGeneration;
+    void run(async () => {
+      await waitForPendingImages();
+      // 先读磁盘版本；确认可恢复后再删除本次编辑遗留、且磁盘正文没有引用的图片。
+      const fresh = await api.readPost(projectGeneration, postId);
+      await api.discardPendingImages(projectGeneration, postId);
+      cancelScheduledDraft();
+      await waitForDraftQueue();
+      await enqueueDraftOperation(() =>
+        api.deleteDraft(projectGeneration, postId),
+      );
+      await loadSession(fresh, false);
+    });
   };
 
   /** 冲突：以本地内容覆盖磁盘（先取最新 revision 再写） */
   const conflictOverwrite = () => {
     setModal(null);
-    if (!session) return;
-    run(async () => {
-      const fresh = await api.readPost(session.id);
-      const fm = serializeFrontmatter(session);
-      const revision = await api.writePost({
-        id: session.id,
-        rawFrontmatter: fm,
-        body: session.body,
-        expectedRevision: fresh.revision,
-      });
-      setSession(afterSave(session, fm, revision));
-      await refreshPosts();
-      await refreshGitStatus();
-      await refreshTags();
+    if (!sessionRef.current || saveInFlightRef.current) return;
+    setSaving(true);
+    setError(null);
+    const operation = (async () => {
+      try {
+        await waitForPendingImages();
+        cancelScheduledDraft();
+        const current = sessionRef.current;
+        if (!current) return true;
+        const snapshot = createSaveSnapshot(current);
+        const fresh = await api.readPost(
+          snapshot.projectGeneration,
+          snapshot.id,
+        );
+        await writeSnapshot(snapshot, fresh.revision);
+        return true;
+      } catch (e) {
+        setError(errorMessage(e));
+        return false;
+      }
+    })();
+    saveInFlightRef.current = operation;
+    void operation.finally(() => {
+      if (saveInFlightRef.current === operation) {
+        saveInFlightRef.current = null;
+        saveRequiresCleanRef.current = false;
+      }
+      setSaving(false);
     });
   };
 
   const handleCreatePost = (name: string) =>
     run(async () => {
+      postOpenRequestRef.current += 1;
       if (!project) return;
+      await waitForPendingImages();
+      cancelScheduledDraft();
+      await waitForDraftQueue();
+      const current = sessionRef.current;
+      if (current) {
+        await api.discardPendingImages(
+          current.projectGeneration,
+          current.id,
+        );
+      }
       const id = ensureExtension(name, project.config.extensions);
       const fm = initialFrontmatter(project.config.frontmatter.fields, id);
       const doc = await api.createPost({
+        projectGeneration: project.generation,
         id,
         rawFrontmatter: fm,
         body: "\n",
@@ -183,51 +631,218 @@ export default function App() {
       await refreshPosts();
       await refreshGitStatus();
       await refreshTags();
-      setSession(sessionFromDocument(doc));
+      await loadSession(doc, false);
     });
 
-  const handleRenamePost = (oldId: string, newName: string) =>
+  const handleRenamePost = (
+    oldId: string,
+    newName: string,
+    discardedDocument?: PostDocument,
+  ) =>
     run(async () => {
+      postOpenRequestRef.current += 1;
       if (!project) return;
+      await waitForPendingImages();
       const newId = ensureExtension(newName, project.config.extensions);
       if (newId === oldId) return;
-      await api.renamePost(oldId, newId);
+      const expectedRevision =
+        discardedDocument?.revision ??
+        (session?.id === oldId
+          ? session.revision
+          : (await api.readPost(project.generation, oldId)).revision);
+      const document = await api.renamePost(
+        project.generation,
+        oldId,
+        newId,
+        expectedRevision,
+      );
       await refreshPosts();
       await refreshGitStatus();
-      if (session?.id === oldId) {
-        setSession({ ...session, id: newId });
+      await refreshTags();
+      try {
+        await enqueueDraftOperation(() =>
+          api.deleteDraft(project.generation, oldId),
+        );
+      } catch {
+        // 重命名已经完成；遗留的旧 ID 草稿无法再匹配新文章，不影响正文结果。
       }
+      await loadSession(document, false);
     });
+
+  const requestDeletePost = (id: string) => {
+    if (!session || session.id !== id) return;
+    setModal({
+      kind: "delete",
+      id,
+      expectedRevision: session.revision,
+      projectGeneration: session.projectGeneration,
+      hasUnsavedChanges:
+        isDirty(session) || pendingImageOperationsRef.current.size > 0,
+    });
+  };
+
+  const confirmDeletePost = () => {
+    if (modal?.kind !== "delete") return;
+    const { id, expectedRevision, projectGeneration } = modal;
+    setModal(null);
+    postOpenRequestRef.current += 1;
+    void run(async () => {
+      await waitForPendingImages();
+      cancelScheduledDraft();
+      await waitForDraftQueue();
+      await api.deletePost(projectGeneration, id, expectedRevision);
+      try {
+        await enqueueDraftOperation(() =>
+          api.deleteDraft(projectGeneration, id),
+        );
+      } catch {
+        // 文章已经进入废纸篓，草稿清理失败不改变删除结果。
+      }
+      setSession((current) => (current?.id === id ? null : current));
+      try {
+        await api.stopPreviewServer();
+      } catch {
+        // 文章已安全移到废纸篓；预览清理失败不应把删除结果伪装成失败。
+      }
+      await refreshPosts();
+      await refreshGitStatus();
+      await refreshTags();
+    });
+  };
 
   const handlePublish = useCallback(
     (message: string, push: boolean) => {
       if (publishing) return;
       setPublishing(true);
       run(async () => {
-        const result = await api.gitPublish(message, push);
-        setPublishResult(result);
+        const projectGeneration = projectRef.current?.generation;
+        if (projectGeneration === undefined) return;
+        if (!(await ensureSaved())) return;
+        const result = await api.gitPublish(projectGeneration, message, push);
+        if (projectRef.current?.generation === projectGeneration) {
+          setPublishResult(result);
+        }
         await refreshGitStatus();
       }).finally(() => setPublishing(false));
     },
-    [publishing, run, refreshGitStatus],
+    [publishing, run, refreshGitStatus, ensureSaved],
   );
 
-  const handleBodyChange = useCallback((body: string) => {
-    setSession((s) => (s ? { ...s, body, bodyDirty: true } : s));
-  }, []);
+  const handleSaveProjectSettings = useCallback(
+    async (config: ProjectConfig) => {
+      if (settingsSaving) return;
+      setSettingsSaving(true);
+      setSettingsError(null);
+      try {
+        const projectGeneration = projectRef.current?.generation;
+        if (projectGeneration === undefined) return;
+        const updated = await api.updateProjectConfig(
+          projectGeneration,
+          config,
+        );
+        setProject(updated);
+        setSettingsOpen(false);
+        // extensions / fields 都可能改变派生列表；配置文件本身也会出现在 Git 状态中。
+        try {
+          await refreshPosts();
+        } catch (e) {
+          setError(errorMessage(e));
+        }
+        await refreshGitStatus();
+        await refreshTags();
+      } catch (e) {
+        setSettingsError(errorMessage(e));
+      } finally {
+        setSettingsSaving(false);
+      }
+    },
+    [settingsSaving, refreshPosts, refreshGitStatus, refreshTags],
+  );
+
+  const handleBodyChange = useCallback(
+    (body: string) => {
+      setSession((current) => {
+        if (!current || current.body === body) return current;
+        return {
+          ...current,
+          body,
+          bodyDirty: true,
+          editVersion: current.editVersion + 1,
+        };
+      });
+    },
+    [setSession],
+  );
 
   const handleFmEdit = (mutate: (fm: FrontmatterDocument) => void) => {
-    if (!session?.fmDoc) return;
-    mutate(session.fmDoc);
-    setSession({ ...session, fmDirty: true });
+    setSession((current) => {
+      if (!current?.fmDoc) return current;
+      const fmDoc = current.fmDoc.clone();
+      mutate(fmDoc);
+      return {
+        ...current,
+        fmDoc,
+        fmDirty: true,
+        editVersion: current.editVersion + 1,
+      };
+    });
   };
 
   const handleAddFrontmatter = () => {
-    if (!session) return;
-    setSession({ ...session, fmDoc: FrontmatterDocument.empty() });
+    setSession((current) =>
+      current
+        ? {
+            ...current,
+            fmDoc: FrontmatterDocument.empty(),
+            fmDirty: true,
+            editVersion: current.editVersion + 1,
+          }
+        : current,
+    );
+  };
+
+  const restoreRecoveryDraft = () => {
+    if (modal?.kind !== "recovery") return;
+    const { document, draft, editorEpoch, projectGeneration } = modal;
+    setModal(null);
+    const current = sessionRef.current;
+    if (
+      !current ||
+      current.id !== document.id ||
+      current.editorEpoch !== editorEpoch ||
+      current.projectGeneration !== projectGeneration
+    ) {
+      return;
+    }
+    try {
+      editorEpochRef.current += 1;
+      setSession(
+        sessionFromDraft(
+          document,
+          draft,
+          editorEpochRef.current,
+          projectGeneration,
+        ),
+      );
+    } catch (e) {
+      setError(`草稿内容无法恢复：${errorMessage(e)}`);
+    }
+  };
+
+  const keepDiskVersion = () => {
+    if (modal?.kind !== "recovery") return;
+    const { document, projectGeneration } = modal;
+    setModal(null);
+    cancelScheduledDraft();
+    void run(async () => {
+      await enqueueDraftOperation(() =>
+        api.deleteDraft(projectGeneration, document.id),
+      );
+    });
   };
 
   const dirty = session ? isDirty(session) : false;
+  const hasUnsavedWork = dirty || pendingImageCount > 0;
 
   return (
     <div className="app-shell">
@@ -241,7 +856,12 @@ export default function App() {
             if (id !== session?.id) guardDirty(() => void doOpenPost(id));
           }}
           onCreatePost={(name) => guardDirty(() => void handleCreatePost(name))}
-          onRenamePost={handleRenamePost}
+          onRenamePost={(oldId, newName) =>
+            guardDirty((fresh) =>
+              handleRenamePost(oldId, newName, fresh),
+            )
+          }
+          onDeletePost={requestDeletePost}
         />
         {project && (
           <GitPanel
@@ -259,18 +879,52 @@ export default function App() {
         <header className="toolbar">
           <span className="doc-title">
             {session ? session.id : project ? "选择一篇文章" : "先打开一个博客项目"}
-            {dirty && <span className="dirty-dot" title="有未保存改动" />}
+            {hasUnsavedWork && (
+              <span className="dirty-dot" title="有未保存改动或图片正在导入" />
+            )}
           </span>
           <div className="toolbar-actions">
-            {project && <PreviewController activePostId={session?.id ?? null} />}
+            {project && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsError(null);
+                  setSettingsOpen(true);
+                }}
+              >
+                项目设置
+              </button>
+            )}
+            {session && (
+              <button
+                type="button"
+                className="editor-mode-toggle"
+                aria-pressed={livePreviewEnabled}
+                title="只改变编辑器显示，不改变 Markdown 原文"
+                onClick={() => setLivePreviewEnabled((enabled) => !enabled)}
+              >
+                实时排版：{livePreviewEnabled ? "开" : "关"}
+              </button>
+            )}
+            {project && (
+              <PreviewController
+                projectGeneration={project.generation}
+                activePostId={session?.id ?? null}
+                beforePreview={ensureSaved}
+              />
+            )}
             {session && (
               <button
                 type="button"
                 className="btn-primary"
-                disabled={!dirty || saving}
+                disabled={!hasUnsavedWork || saving}
                 onClick={handleSave}
               >
-                {saving ? "保存中…" : "保存 (Ctrl+S)"}
+                {saving && pendingImageCount > 0
+                  ? "等待图片…"
+                  : saving
+                    ? "保存中…"
+                    : "保存 (Ctrl+S)"}
               </button>
             )}
           </div>
@@ -287,12 +941,15 @@ export default function App() {
 
         {session ? (
           <MarkdownEditor
-            sessionKey={`${session.id}@${session.revision}`}
+            sessionKey={editorSessionKey(session)}
             postId={session.id}
+            projectGeneration={session.projectGeneration}
             initialBody={session.body}
+            livePreviewEnabled={livePreviewEnabled}
             onChange={handleBodyChange}
             onSave={handleSave}
             onImageError={setError}
+            onImageOperation={registerImageOperation}
           />
         ) : (
           <div className="empty-state">
@@ -316,6 +973,20 @@ export default function App() {
         </aside>
       )}
 
+      {settingsOpen && project && (
+        <ProjectSettingsDialog
+          project={project}
+          activePostId={session?.id ?? null}
+          saving={settingsSaving}
+          serverError={settingsError}
+          onClose={() => {
+            setSettingsOpen(false);
+            setSettingsError(null);
+          }}
+          onSave={(config) => void handleSaveProjectSettings(config)}
+        />
+      )}
+
       {modal?.kind === "conflict" && (
         <Modal
           title="文件在外部被修改"
@@ -330,20 +1001,90 @@ export default function App() {
           ]}
         />
       )}
+      {modal?.kind === "recovery" && (
+        <Modal
+          title="发现未保存的自动草稿"
+          message={`“${modal.document.id}”有一份 ${new Date(
+            modal.draft.savedAtMs,
+          ).toLocaleString()} 保存的恢复内容。${
+            modal.draft.baseRevision === modal.document.revision
+              ? "它基于当前磁盘版本。"
+              : "磁盘文件后来发生过变化；恢复后请先检查再保存。"
+          }`}
+          actions={[
+            {
+              label: "使用磁盘版本",
+              kind: "danger",
+              onClick: keepDiskVersion,
+            },
+            {
+              label: "恢复草稿",
+              kind: "primary",
+              onClick: restoreRecoveryDraft,
+            },
+          ]}
+        />
+      )}
+      {modal?.kind === "close" && (
+        <Modal
+          title="还有未保存的内容"
+          message="图片导入或文字修改尚未安全落盘。你可以先保存，也可以明确放弃后退出。"
+          actions={[
+            { label: "取消", onClick: () => setModal(null) },
+            {
+              label: "放弃并退出",
+              kind: "danger",
+              onClick: discardAndClose,
+            },
+            { label: "保存并退出", onClick: saveAndClose },
+          ]}
+        />
+      )}
       {modal?.kind === "discard" && (
         <Modal
           title="有未保存的改动"
-          message="当前文章有未保存的改动，继续将丢弃这些改动。"
+          message="当前文章有未保存的改动，继续将恢复磁盘版本，并清理这次编辑中新粘贴但未保存引用的图片。"
           actions={[
             { label: "取消", onClick: () => setModal(null) },
             {
               label: "丢弃改动并继续",
               kind: "danger",
               onClick: () => {
-                const next = modal.next;
+                const { postId, projectGeneration, next } = modal;
                 setModal(null);
-                next();
+                void run(async () => {
+                  await waitForPendingImages();
+                  // 先确认磁盘文章仍可读取，避免清完图片后才发现无法恢复编辑会话。
+                  const fresh = await api.readPost(
+                    projectGeneration,
+                    postId,
+                  );
+                  cancelScheduledDraft();
+                  await waitForDraftQueue();
+                  await api.discardPendingImages(projectGeneration, postId);
+                  await enqueueDraftOperation(() =>
+                    api.deleteDraft(projectGeneration, postId),
+                  );
+                  await loadSession(fresh, false);
+                  await next(fresh);
+                });
               },
+            },
+          ]}
+        />
+      )}
+      {modal?.kind === "delete" && (
+        <Modal
+          title="把文章移到废纸篓？"
+          message={`将把“${modal.id}”及正文直接引用的同目录图片移到系统废纸篓；目录里的其他文件会保留。${
+            modal.hasUnsavedChanges ? " 当前未保存的文字和图片改动也会丢失。" : ""
+          }`}
+          actions={[
+            { label: "取消", onClick: () => setModal(null) },
+            {
+              label: "移到废纸篓",
+              kind: "danger",
+              onClick: confirmDeletePost,
             },
           ]}
         />

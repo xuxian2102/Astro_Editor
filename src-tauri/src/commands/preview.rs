@@ -1,6 +1,6 @@
 use tauri::{AppHandle, State};
 
-use super::current_project;
+use super::current_project_at;
 use crate::error::AppError;
 use crate::model::PreviewStatus;
 use crate::services::preview;
@@ -10,9 +10,13 @@ use crate::state::AppState;
 pub async fn ensure_preview_server(
     app: AppHandle,
     state: State<'_, AppState>,
+    project_generation: u64,
     post_id: Option<String>,
 ) -> Result<PreviewStatus, AppError> {
-    let ctx = current_project(&state)?;
+    let ctx = {
+        let _content_guard = state.content_lock.lock().expect("content lock poisoned");
+        current_project_at(&state, project_generation)?
+    };
     preview::ensure(app, ctx, post_id).await
 }
 

@@ -16,6 +16,14 @@ export class FrontmatterDocument {
     return new FrontmatterDocument(new Document(new Map()));
   }
 
+  /**
+   * 表单编辑前先复制 Document，避免异步保存持有的旧 session 与当前表单共享同一个
+   * 可变 yaml.Document。yaml 自带的 clone 会保留注释、节点样式和字段顺序。
+   */
+  clone(): FrontmatterDocument {
+    return new FrontmatterDocument(this.doc.clone());
+  }
+
   isEmpty(): boolean {
     const contents = this.doc.contents as { items?: unknown[] } | null;
     return (

@@ -25,6 +25,23 @@ pub struct PostDocument {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DraftDocument {
+    pub post_id: String,
+    pub raw_frontmatter: Option<String>,
+    pub body: String,
+    pub base_revision: String,
+    pub saved_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedImage {
+    /// 可以直接写入 Markdown 图片目标的、相对文章文件的路径。
+    pub markdown_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectConfig {
     pub version: u32,
     #[serde(default = "default_content_dir")]
@@ -35,6 +52,8 @@ pub struct ProjectConfig {
     pub frontmatter: FrontmatterConfig,
     #[serde(default)]
     pub preview: PreviewConfig,
+    #[serde(default)]
+    pub assets: AssetsConfig,
 }
 
 impl Default for ProjectConfig {
@@ -45,6 +64,7 @@ impl Default for ProjectConfig {
             extensions: default_extensions(),
             frontmatter: FrontmatterConfig::default(),
             preview: PreviewConfig::default(),
+            assets: AssetsConfig::default(),
         }
     }
 }
@@ -61,6 +81,21 @@ fn default_extensions() -> Vec<String> {
 pub struct FrontmatterConfig {
     #[serde(default)]
     pub fields: Vec<FieldSpec>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetsConfig {
+    #[serde(default)]
+    pub mode: AssetMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssetMode {
+    /// 图片放在文章同目录下、与文章 stem 同名的子目录中。
+    #[default]
+    Colocated,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,13 +166,15 @@ pub struct ProjectContext {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
     pub root: String,
+    pub generation: u64,
     pub config: ProjectConfig,
 }
 
 impl ProjectContext {
-    pub fn info(&self) -> ProjectInfo {
+    pub fn info(&self, generation: u64) -> ProjectInfo {
         ProjectInfo {
             root: self.root.display().to_string(),
+            generation,
             config: self.config.clone(),
         }
     }
@@ -195,7 +232,11 @@ pub struct PublishResult {
 /// generation 用于让后台任务能核对自己发起的这一轮启动是否还是"当前"这一轮，
 /// 防止过期的后台任务在新一轮开始后才姗姗来迟地覆盖状态。
 #[derive(Debug, Clone, Default, Serialize)]
-#[serde(tag = "phase", rename_all = "snake_case")]
+#[serde(
+    tag = "phase",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum PreviewStatus {
     #[default]
     Stopped,
@@ -216,4 +257,30 @@ pub enum PreviewStatus {
         message: String,
         log_tail: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PreviewStatus;
+
+    #[test]
+    fn preview_status_uses_the_typescript_field_names() {
+        let starting = serde_json::to_value(PreviewStatus::Starting {
+            generation: 2,
+            started_at_ms: 123,
+        })
+        .unwrap();
+        assert_eq!(starting["phase"], "starting");
+        assert_eq!(starting["startedAtMs"], 123);
+        assert!(starting.get("started_at_ms").is_none());
+
+        let failed = serde_json::to_value(PreviewStatus::Failed {
+            generation: 2,
+            message: "boom".into(),
+            log_tail: "details".into(),
+        })
+        .unwrap();
+        assert_eq!(failed["logTail"], "details");
+        assert!(failed.get("log_tail").is_none());
+    }
 }

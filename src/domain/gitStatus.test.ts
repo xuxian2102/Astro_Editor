@@ -47,6 +47,17 @@ describe("canPublish", () => {
   it("没有任何改动时为 false", () => {
     expect(canPublish(status([]))).toBe(false);
   });
+
+  it("仓库存在未解决冲突时禁止发布，即使另有 managed 改动", () => {
+    expect(
+      canPublish(
+        status([
+          change({ path: "src/content/blog/a.md" }),
+          change({ path: "README.md", kind: "unmerged", managed: false }),
+        ]),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("changeLabel", () => {

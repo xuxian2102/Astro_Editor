@@ -1,16 +1,136 @@
+use std::os::unix::process::CommandExt as _;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::error::AppError;
 use crate::model::{ChangeKind, FileChange, GitStatus, ProjectContext, PublishResult};
 
+const MAX_GIT_STREAM_BYTES: usize = 16 * 1024 * 1024;
+const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+const GIT_PUSH_TIMEOUT: Duration = Duration::from_secs(180);
+
+fn command_timeout(args: &[&str]) -> Duration {
+    if args.first() == Some(&"push") {
+        GIT_PUSH_TIMEOUT
+    } else {
+        GIT_COMMAND_TIMEOUT
+    }
+}
+
+fn read_bounded(mut stream: impl std::io::Read) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        let count = stream.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        let remaining = MAX_GIT_STREAM_BYTES.saturating_sub(bytes.len());
+        bytes.extend_from_slice(&buffer[..count.min(remaining)]);
+        if count > remaining {
+            truncated = true;
+        }
+    }
+    Ok((bytes, truncated))
+}
+
+fn terminate_process_group(child: &mut std::process::Child) {
+    let Ok(pid) = i32::try_from(child.id()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    };
+    // SAFETY: spawn 时为 git 创建了 pid == pgid 的独立进程组；负 pid 只作用于该组。
+    unsafe {
+        libc::kill(-pid, libc::SIGTERM);
+    }
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        let _ = child.try_wait();
+        // SAFETY: signal 0 不发送信号，只检查这个独立进程组是否仍存在。
+        if unsafe { libc::kill(-pid, 0) } != 0 {
+            let _ = child.wait();
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    // SAFETY: 同上；SIGTERM 后仍存活时强制结束，避免 hook/ssh 子进程遗留。
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
 fn run_git(root: &Path, args: &[&str]) -> Result<Output, AppError> {
-    Command::new("git")
+    let mut child = Command::new("git")
         .current_dir(root)
         .env("GIT_TERMINAL_PROMPT", "0")
         .args(args)
-        .output()
-        .map_err(|e| AppError::Git(format!("无法执行 git：{e}")))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| AppError::Git(format!("无法执行 git：{error}")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::Git("无法读取 git 标准输出".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| AppError::Git("无法读取 git 错误输出".into()))?;
+    let stdout_reader = thread::spawn(move || read_bounded(stdout));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr));
+
+    let deadline = Instant::now() + command_timeout(args);
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| AppError::Git(format!("等待 git 失败：{error}")))?
+        {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            terminate_process_group(&mut child);
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(AppError::Git(format!(
+                "git {} 执行超时（{} 秒）",
+                args.first().copied().unwrap_or("command"),
+                command_timeout(args).as_secs(),
+            )));
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+
+    if let Ok(pid) = i32::try_from(child.id()) {
+        // git 已退出时，清理极少数仍继承 stdout/stderr 的后台 hook/helper，避免读取线程
+        // 因管道不关闭而永久等待。此进程组只属于本次 git 命令。
+        // SAFETY: spawn 时用 process_group(0) 创建了独立进程组。
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+
+    let (stdout, stdout_truncated) = stdout_reader
+        .join()
+        .map_err(|_| AppError::Git("git 标准输出读取线程异常结束".into()))?
+        .map_err(|error| AppError::Git(format!("读取 git 标准输出失败：{error}")))?;
+    let (stderr, stderr_truncated) = stderr_reader
+        .join()
+        .map_err(|_| AppError::Git("git 错误输出读取线程异常结束".into()))?
+        .map_err(|error| AppError::Git(format!("读取 git 错误输出失败：{error}")))?;
+    if stdout_truncated || stderr_truncated {
+        return Err(AppError::Git("git 输出超过 16 MiB，已中止处理".into()));
+    }
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 /// 裁剪过的 stderr，用于把 git 的原始报错透传给用户
@@ -54,7 +174,9 @@ pub fn status(ctx: &ProjectContext) -> Result<GitStatus, AppError> {
 
 fn is_managed(path: &str, content_dir: &str) -> bool {
     let content_dir = content_dir.trim_end_matches('/');
-    path == content_dir || path.starts_with(&format!("{content_dir}/"))
+    path == ".blog-editor.json"
+        || path == content_dir
+        || path.starts_with(&format!("{content_dir}/"))
 }
 
 fn classify(xy: &str) -> ChangeKind {
@@ -210,6 +332,28 @@ fn classify_push_error(stderr: &str) -> String {
 pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<PublishResult, AppError> {
     let current = status(ctx)?;
 
+    let mut unmerged_paths: Vec<&str> = current
+        .changes
+        .iter()
+        .filter(|change| change.kind == ChangeKind::Unmerged)
+        .map(|change| change.path.as_str())
+        .collect();
+    if !unmerged_paths.is_empty() {
+        unmerged_paths.sort_unstable();
+        return Ok(PublishResult {
+            staged: false,
+            staged_files: vec![],
+            committed: false,
+            commit_hash: None,
+            pushed: false,
+            error_stage: Some("stage".into()),
+            message: Some(format!(
+                "存在未解决的 Git 冲突，发布已中止：{}",
+                unmerged_paths.join("、")
+            )),
+        });
+    }
+
     let mut managed_paths: Vec<String> = Vec::new();
     for change in &current.changes {
         if change.managed {
@@ -345,6 +489,7 @@ mod tests {
             "# branch.head main",
             "1 A. N... 000000 100644 100644 000000 h1 src/content/blog/new.md",
             "? src/content/blog/draft.md",
+            "1 .M N... 100644 100644 100644 h1 h2 .blog-editor.json",
             "1 .M N... 100644 100644 100644 h1 h2 README.md",
         ]);
         let status = parse_porcelain_v2(&text, "src/content/blog");
@@ -358,6 +503,8 @@ mod tests {
         let untracked = by_path("src/content/blog/draft.md");
         assert_eq!(untracked.kind, ChangeKind::Untracked);
         assert!(untracked.managed);
+
+        assert!(by_path(".blog-editor.json").managed);
 
         let readme = by_path("README.md");
         assert!(!readme.managed);
@@ -374,10 +521,7 @@ mod tests {
         assert_eq!(status.changes.len(), 1);
         let c = &status.changes[0];
         assert_eq!(c.path, "src/content/blog/new-name.md");
-        assert_eq!(
-            c.old_path.as_deref(),
-            Some("src/content/blog/old-name.md")
-        );
+        assert_eq!(c.old_path.as_deref(), Some("src/content/blog/old-name.md"));
         assert_eq!(c.kind, ChangeKind::Renamed);
     }
 
@@ -475,10 +619,16 @@ mod tests {
     fn publish_commits_only_managed_files() {
         let (_dir, ctx) = init_repo();
         std::fs::write(ctx.root.join("README.md"), "hello\n").unwrap();
+        std::fs::write(ctx.root.join(".blog-editor.json"), "{\"version\":1}\n").unwrap();
         std::fs::write(ctx.content_root.join("a.md"), "original\n").unwrap();
         commit_all(&ctx.root, "init");
 
         std::fs::write(ctx.root.join("README.md"), "changed outside\n").unwrap();
+        std::fs::write(
+            ctx.root.join(".blog-editor.json"),
+            "{\"version\":1,\"assets\":{\"mode\":\"colocated\"}}\n",
+        )
+        .unwrap();
         std::fs::write(ctx.content_root.join("a.md"), "changed inside\n").unwrap();
 
         let result = publish(&ctx, "更新文章", false).unwrap();
@@ -487,7 +637,13 @@ mod tests {
         assert!(result.commit_hash.is_some());
         assert!(!result.pushed);
         assert_eq!(result.error_stage, None);
-        assert_eq!(result.staged_files, vec!["src/content/blog/a.md".to_string()]);
+        assert_eq!(
+            result.staged_files,
+            vec![
+                ".blog-editor.json".to_string(),
+                "src/content/blog/a.md".to_string(),
+            ]
+        );
 
         let show = Command::new("git")
             .current_dir(&ctx.root)
@@ -503,6 +659,7 @@ mod tests {
             .unwrap();
         let s = String::from_utf8_lossy(&status_after.stdout);
         assert!(s.contains("README.md"));
+        assert!(!s.contains(".blog-editor.json"));
         assert!(!s.contains("a.md"));
     }
 
@@ -517,6 +674,38 @@ mod tests {
         assert!(!result.committed);
         assert_eq!(result.error_stage.as_deref(), Some("stage"));
         assert_eq!(result.message.as_deref(), Some("没有可提交的改动"));
+    }
+
+    #[test]
+    fn publish_rejects_unmerged_files_without_changing_the_index() {
+        let (_dir, ctx) = init_repo();
+        let article = ctx.content_root.join("a.md");
+        std::fs::write(&article, "base\n").unwrap();
+        commit_all(&ctx.root, "base");
+
+        run(&ctx.root, &["checkout", "-q", "-b", "other"]);
+        std::fs::write(&article, "other\n").unwrap();
+        commit_all(&ctx.root, "other");
+        run(&ctx.root, &["checkout", "-q", "main"]);
+        std::fs::write(&article, "main\n").unwrap();
+        commit_all(&ctx.root, "main");
+
+        let merge = Command::new("git")
+            .current_dir(&ctx.root)
+            .args(["merge", "other"])
+            .output()
+            .unwrap();
+        assert!(!merge.status.success());
+
+        let unmerged_before = run_git(&ctx.root, &["ls-files", "-u"]).unwrap().stdout;
+        let result = publish(&ctx, "不应提交", false).unwrap();
+        let unmerged_after = run_git(&ctx.root, &["ls-files", "-u"]).unwrap().stdout;
+
+        assert!(!result.staged);
+        assert!(!result.committed);
+        assert_eq!(result.error_stage.as_deref(), Some("stage"));
+        assert!(result.message.unwrap().contains("未解决的 Git 冲突"));
+        assert_eq!(unmerged_after, unmerged_before);
     }
 
     #[test]

@@ -3,13 +3,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
 use crate::model::{PreviewStatus, ProjectContext};
+use crate::services::posts;
 use crate::state::AppState;
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
@@ -31,13 +32,23 @@ pub struct PreviewManager {
 
 // ---- 纯函数 / 不依赖 AppHandle 的核心逻辑：直接单测 ----
 
-/// 去掉文件名里的扩展名，约定与 Astro Content Collections `glob()` loader 的默认 id 规则一致
-pub fn resolve_slug(post_id: &str) -> &str {
+/// 按 Astro 5 Content Collections `glob()` loader 的默认规则，把文件路径转成 Entry ID：
+/// 去掉最终扩展名、逐段使用 GitHub slugger，并把嵌套目录中的 `/index` 归约到目录本身。
+pub fn resolve_slug(post_id: &str) -> String {
     let last_slash = post_id.rfind('/').map(|i| i + 1).unwrap_or(0);
-    match post_id[last_slash..].rfind('.') {
+    let without_extension = match post_id[last_slash..].rfind('.') {
         Some(rel_idx) => &post_id[..last_slash + rel_idx],
         None => post_id,
+    };
+    let mut slug = without_extension
+        .split('/')
+        .map(github_slugger::slug)
+        .collect::<Vec<_>>()
+        .join("/");
+    if let Some(parent) = slug.strip_suffix("/index") {
+        slug = parent.to_owned();
     }
+    slug
 }
 
 pub fn resolve_route(template: &str, slug: &str) -> String {
@@ -46,13 +57,19 @@ pub fn resolve_route(template: &str, slug: &str) -> String {
 
 pub fn resolve_executable(root: &Path, command: &str) -> Result<PathBuf, AppError> {
     let path = root.join(command);
-    if !path.is_file() {
-        return Err(AppError::Preview(format!(
+    let canonical = path.canonicalize().map_err(|_| {
+        AppError::Preview(format!(
             "找不到预览命令：{}（请先在项目里执行 pnpm install / npm install）",
+            path.display()
+        ))
+    })?;
+    if !canonical.is_file() || !canonical.starts_with(root) {
+        return Err(AppError::Preview(format!(
+            "预览命令必须解析到项目目录内的文件：{}",
             path.display()
         )));
     }
-    Ok(path)
+    Ok(canonical)
 }
 
 /// 核对 generation 后再写状态；不一致说明是过期的后台任务，直接丢弃
@@ -60,7 +77,10 @@ fn try_apply(manager: &mut PreviewManager, generation: u64, status: PreviewStatu
     if manager.generation != generation {
         return false;
     }
-    let terminal = matches!(status, PreviewStatus::Stopped | PreviewStatus::Failed { .. });
+    let terminal = matches!(
+        status,
+        PreviewStatus::Stopped | PreviewStatus::Failed { .. }
+    );
     manager.status = status;
     if terminal {
         manager.cancellation = None;
@@ -68,10 +88,30 @@ fn try_apply(manager: &mut PreviewManager, generation: u64, status: PreviewStatu
     true
 }
 
-fn compute_target_path(ctx: &ProjectContext, post_id: Option<&str>) -> String {
+fn frontmatter_slug(ctx: &ProjectContext, post_id: &str) -> Result<Option<String>, AppError> {
+    let document = posts::read_post(ctx, post_id)?;
+    let Some(raw_frontmatter) = document.raw_frontmatter else {
+        return Ok(None);
+    };
+    // Astro 的 glob loader 在默认 ID 生成前会优先采用 data.slug。解析失败留给 Astro
+    // 自己报告正文错误，这里退回文件名规则，避免预览按钮制造第二套 YAML 报错。
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&raw_frontmatter) else {
+        return Ok(None);
+    };
+    Ok(value
+        .get("slug")
+        .and_then(serde_yaml::Value::as_str)
+        .filter(|slug| !slug.is_empty())
+        .map(str::to_owned))
+}
+
+fn compute_target_path(ctx: &ProjectContext, post_id: Option<&str>) -> Result<String, AppError> {
     match (&ctx.config.preview.route_template, post_id) {
-        (Some(template), Some(id)) => resolve_route(template, resolve_slug(id)),
-        _ => "/".to_string(),
+        (Some(template), Some(id)) => {
+            let slug = frontmatter_slug(ctx, id)?.unwrap_or_else(|| resolve_slug(id));
+            Ok(resolve_route(template, &slug))
+        }
+        _ => Ok("/".to_string()),
     }
 }
 
@@ -108,6 +148,10 @@ async fn probe_ready(host: &str, port: u16) -> bool {
     }
 }
 
+async fn port_is_available(host: &str, port: u16) -> bool {
+    TcpListener::bind((host, port)).await.is_ok()
+}
+
 async fn terminate_process_group(child: &mut tokio::process::Child) {
     let Some(pid) = child.id() else {
         let _ = child.kill().await;
@@ -133,14 +177,20 @@ fn spawn_drain(
     buf: Arc<TokioMutex<String>>,
 ) {
     tokio::spawn(async move {
-        let mut lines = tokio::io::BufReader::new(pipe).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
+        let mut reader = tokio::io::BufReader::new(pipe);
+        let mut chunk = [0u8; 1024];
+        while let Ok(size) = reader.read(&mut chunk).await {
+            if size == 0 {
+                break;
+            }
             let mut guard = buf.lock().await;
-            guard.push_str(&line);
-            guard.push('\n');
+            guard.push_str(&String::from_utf8_lossy(&chunk[..size]));
             if guard.len() > LOG_TAIL_MAX_LEN {
-                let excess = guard.len() - LOG_TAIL_MAX_LEN;
-                guard.drain(..excess);
+                let mut start = guard.len() - LOG_TAIL_MAX_LEN;
+                while !guard.is_char_boundary(start) {
+                    start += 1;
+                }
+                guard.drain(..start);
             }
         }
     });
@@ -182,7 +232,11 @@ async fn run_startup(
     port: u16,
     cancel_token: &CancellationToken,
     startup_timeout: Duration,
-) -> (StartupOutcome, Option<tokio::process::Child>, Arc<TokioMutex<String>>) {
+) -> (
+    StartupOutcome,
+    Option<tokio::process::Child>,
+    Arc<TokioMutex<String>>,
+) {
     let log_tail: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
 
     let mut child = match build_command(exe, cwd, args).spawn() {
@@ -214,7 +268,11 @@ async fn run_startup(
             _ = &mut deadline => break StartupOutcome::TimedOut,
             _ = probe.tick() => {
                 if probe_ready(host, port).await {
-                    break StartupOutcome::Ready;
+                    match child.try_wait() {
+                        Ok(None) => break StartupOutcome::Ready,
+                        Ok(Some(status)) => break StartupOutcome::ExitedEarly(Ok(status)),
+                        Err(error) => break StartupOutcome::ExitedEarly(Err(error)),
+                    }
                 }
             }
         }
@@ -249,18 +307,26 @@ pub async fn ensure(
     post_id: Option<String>,
 ) -> Result<PreviewStatus, AppError> {
     let state = app.state::<AppState>();
-    let target_path = compute_target_path(&ctx, post_id.as_deref());
+    let target_path = compute_target_path(&ctx, post_id.as_deref())?;
 
     let (generation, token, status) = {
         let mut manager = state.preview.lock().await;
         let same_project = manager.project_root.as_deref() == Some(ctx.root.as_path());
 
         if same_project {
-            match &manager.status {
-                PreviewStatus::Ready { .. } => {
-                    let status = manager.status.clone();
+            match manager.status.clone() {
+                PreviewStatus::Ready {
+                    generation, pid, ..
+                } => {
                     let full_url = format!("{}{}", base_url(&ctx), target_path);
+                    let status = PreviewStatus::Ready {
+                        generation,
+                        url: full_url.clone(),
+                        pid,
+                    };
+                    manager.status = status.clone();
                     drop(manager);
+                    emit_status(&app, &status);
                     navigate_preview_window(&app, &full_url)?;
                     return Ok(status);
                 }
@@ -300,13 +366,18 @@ pub async fn ensure(
     Ok(status)
 }
 
-/// 请求停止：只把状态改成 Stopping、发出取消信号，立刻返回，不等真正停下
+/// 请求停止：运行中的生命周期改成 Stopping、发出取消信号并立刻返回；Failed 已经没有
+/// 子进程可等，直接清回 Stopped，避免配置保存后永久卡在“正在停止预览”。
 pub async fn stop(app: &AppHandle) -> Result<PreviewStatus, AppError> {
     let state = app.state::<AppState>();
     let mut manager = state.preview.lock().await;
     let status = match &manager.status {
         PreviewStatus::Stopped => return Ok(PreviewStatus::Stopped),
         PreviewStatus::Stopping { .. } => manager.status.clone(),
+        PreviewStatus::Failed { .. } => {
+            manager.status = PreviewStatus::Stopped;
+            PreviewStatus::Stopped
+        }
         _ => {
             let generation = manager.generation;
             let status = PreviewStatus::Stopping { generation };
@@ -320,6 +391,31 @@ pub async fn stop(app: &AppHandle) -> Result<PreviewStatus, AppError> {
     drop(manager);
     emit_status(app, &status);
     Ok(status)
+}
+
+/// 项目切换必须等旧进程组真正退出，不能只发取消信号后立刻启动新项目。
+pub async fn stop_and_wait(app: &AppHandle) -> Result<PreviewStatus, AppError> {
+    let initial = stop(app).await?;
+    if !matches!(initial, PreviewStatus::Stopping { .. }) {
+        return Ok(initial);
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+    loop {
+        let status = current_status(app).await;
+        if matches!(
+            status,
+            PreviewStatus::Stopped | PreviewStatus::Failed { .. }
+        ) {
+            return Ok(status);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(AppError::Preview(
+                "等待旧预览进程退出超时，请停止占用的 Astro 进程后重试".into(),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 pub async fn current_status(app: &AppHandle) -> PreviewStatus {
@@ -413,6 +509,23 @@ async fn run_preview_lifecycle(
             return;
         }
     };
+
+    if !port_is_available(&ctx.config.preview.host, ctx.config.preview.port).await {
+        finish(
+            &app,
+            generation,
+            PreviewStatus::Failed {
+                generation,
+                message: format!(
+                    "预览端口 {} 已被占用，请停止占用进程或在项目设置中更换端口",
+                    ctx.config.preview.port
+                ),
+                log_tail: String::new(),
+            },
+        )
+        .await;
+        return;
+    }
 
     // astro dev 的 --host/--port 约定只有这里知道，run_startup 本身对命令行参数不做假设
     let mut args = ctx.config.preview.args.clone();
@@ -513,13 +626,14 @@ async fn run_preview_lifecycle(
                 }
                 SteadyOutcome::ExitedUnexpectedly(exit) => {
                     let message = format!("预览进程意外退出（{exit:?}）");
+                    let tail = log_tail.lock().await.clone();
                     if finish(
                         &app,
                         generation,
                         PreviewStatus::Failed {
                             generation,
                             message,
-                            log_tail: String::new(),
+                            log_tail: tail,
                         },
                     )
                     .await
@@ -535,15 +649,52 @@ async fn run_preview_lifecycle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ProjectConfig;
     use std::path::PathBuf;
 
     #[test]
-    fn resolve_slug_strips_only_final_extension() {
+    fn resolve_slug_matches_astro_default_content_id_rules() {
         assert_eq!(resolve_slug("hello-astro.md"), "hello-astro");
         assert_eq!(resolve_slug("nested/2026-plans.md"), "nested/2026-plans");
+        assert_eq!(resolve_slug("Photo_test.md"), "photo_test");
+        assert_eq!(resolve_slug("Nested/My Post!.md"), "nested/my-post");
+        assert_eq!(resolve_slug("Nested/index.md"), "nested");
         assert_eq!(resolve_slug("no-extension"), "no-extension");
-        assert_eq!(resolve_slug("a.b/c"), "a.b/c");
-        assert_eq!(resolve_slug("a.b/c.md"), "a.b/c");
+        assert_eq!(resolve_slug("a.b/c"), "ab/c");
+        assert_eq!(resolve_slug("a.b/c.md"), "ab/c");
+    }
+
+    #[test]
+    fn compute_target_path_honors_default_and_frontmatter_slugs() {
+        let dir = tempfile::tempdir().unwrap();
+        let content_root = dir.path().canonicalize().unwrap();
+        let mut config = ProjectConfig::default();
+        config.preview.route_template = Some("/blog/{slug}".into());
+        let ctx = ProjectContext {
+            root: content_root.clone(),
+            content_root: content_root.clone(),
+            config,
+        };
+
+        std::fs::write(
+            content_root.join("Photo_test.md"),
+            "---\ntitle: Photo\n---\nbody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            content_root.join("custom.md"),
+            "---\ntitle: Custom\nslug: Kept/Exactly\n---\nbody\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            compute_target_path(&ctx, Some("Photo_test.md")).unwrap(),
+            "/blog/photo_test"
+        );
+        assert_eq!(
+            compute_target_path(&ctx, Some("custom.md")).unwrap(),
+            "/blog/Kept/Exactly"
+        );
     }
 
     #[test]
@@ -747,7 +898,7 @@ mod tests {
     /// 孙进程 pid 通过子进程自己的 stdout 传回来，避免用共享文件路径（并发测试会互相踩）。
     #[tokio::test]
     async fn terminate_process_group_kills_grandchildren_too() {
-        let mut child = tokio::process::Command::new(&sh())
+        let mut child = tokio::process::Command::new(sh())
             .arg("-c")
             .arg("sleep 30 & echo $!; wait")
             .stdout(std::process::Stdio::piped())
@@ -760,7 +911,7 @@ mod tests {
         let mut line = String::new();
         tokio::time::timeout(
             Duration::from_secs(2),
-            AsyncBufReadExt::read_line(&mut reader, &mut line),
+            tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line),
         )
         .await
         .expect("等孙进程 pid 超时")
@@ -787,12 +938,15 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        assert!(!still_alive, "进程组被杀之后，孙进程也必须在短时间内一起消失");
+        assert!(
+            !still_alive,
+            "进程组被杀之后，孙进程也必须在短时间内一起消失"
+        );
     }
 
     #[tokio::test]
     async fn run_steady_reacts_to_cancellation_and_early_exit() {
-        let mut child = tokio::process::Command::new(&sh())
+        let mut child = tokio::process::Command::new(sh())
             .arg("-c")
             .arg("sleep 30")
             .spawn()
@@ -805,7 +959,7 @@ mod tests {
         ));
         let _ = child.kill().await;
 
-        let mut child = tokio::process::Command::new(&sh())
+        let mut child = tokio::process::Command::new(sh())
             .arg("-c")
             .arg("exit 0")
             .spawn()
