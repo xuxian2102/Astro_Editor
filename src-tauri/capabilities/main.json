@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "受信主窗口：授予全部应用命令。preview 窗口（后续阶段加入）不得出现在这里。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-select-project",
+    "allow-get-project",
+    "allow-list-posts",
+    "allow-read-post",
+    "allow-write-post",
+    "allow-create-post",
+    "allow-rename-post"
+  ]
+}

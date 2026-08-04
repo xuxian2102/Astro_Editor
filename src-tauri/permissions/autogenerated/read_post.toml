@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-post"
+description = "Enables the read_post command without any pre-configured scope."
+commands.allow = ["read_post"]
+
+[[permission]]
+identifier = "deny-read-post"
+description = "Denies the read_post command without any pre-configured scope."
+commands.deny = ["read_post"]

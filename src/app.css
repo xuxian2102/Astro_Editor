@@ -1,0 +1,21 @@
+:root {
+  font-family: system-ui, "Noto Sans CJK SC", sans-serif;
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  height: 100vh;
+}
+
+.app-shell {
+  height: 100%;
+  display: flex;
+}

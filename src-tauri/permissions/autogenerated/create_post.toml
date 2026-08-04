@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-post"
+description = "Enables the create_post command without any pre-configured scope."
+commands.allow = ["create_post"]
+
+[[permission]]
+identifier = "deny-create-post"
+description = "Denies the create_post command without any pre-configured scope."
+commands.deny = ["create_post"]
