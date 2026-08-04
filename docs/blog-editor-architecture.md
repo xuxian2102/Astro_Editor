@@ -1,6 +1,6 @@
 # 个人博客写作工具 — 架构设计
 
-当前目标平台仅为 Linux（Tauri v2 + WebKitGTK）；Windows 不在构建、运行或 CI 范围内。
+当前运行契约只有 **Arch Linux rolling + 原生 Wayland**（Tauri v2 + WebKitGTK），并且只是个人项目。X11/XWayland、其他 Linux 发行版、Windows 与 macOS 都不在构建、运行或 CI 范围内。
 
 ## 核心原则
 
@@ -143,8 +143,9 @@ my-blog-editor/
 │       └── GitPanel.tsx            # 提交 / 提交并推送 两个按钮
 │
 ├── test/e2e/
+│   ├── run-wayland.sh              # 隔离 headless Wayland compositor，禁用 XWayland
 │   ├── wdio.conf.mjs               # 临时项目 + 嵌入式 Tauri WebDriver
-│   └── specs/editor-smoke.e2e.mjs  # 真实 WebKitGTK 打开/编辑/保存闭环
+│   └── specs/editor-smoke.e2e.mjs  # WebKitGTK 编辑 + Wayland 图片 Ctrl+V 闭环
 │
 ├── package.json
 └── vite.config.ts
@@ -278,7 +279,7 @@ HTTP 轮询和预览子进程退出不跨越状态锁；Git 发布为了给 stag
 
 ### 6.1 WebKitGTK 验收与长文档预算
 
-- `pnpm test:e2e` 以 `e2e,custom-protocol` feature 构建独立的 `blog-editor-e2e` 测试二进制，通过 `@wdio/tauri-service` 的嵌入式 WebDriver 在 Xvfb 中驱动真实 WebKitGTK；用例覆盖自动打开隔离项目、文章打开、实时/源码模式切换、真实键盘输入、删除线装饰、dirty 状态、保存以及最终磁盘内容。
+- `pnpm test:e2e` 以 `e2e,custom-protocol` feature 构建独立的 `blog-editor-e2e` 测试二进制，在无 `DISPLAY` 的隔离 headless Wayland compositor 中，通过 `@wdio/tauri-service` 的嵌入式 WebDriver 驱动真实 WebKitGTK。用例覆盖自动打开项目、文章打开、实时/源码模式切换、键盘输入、删除线装饰、dirty 状态和保存；同时用 `wl-copy image/png` 设置真实 Wayland 剪贴板，再验证 Ctrl+V、Rust 原生读取、资产字节、内嵌图片与最终 Markdown 引用。
 - `tauri-plugin-wdio-webdriver` 是 optional dependency，只在 `e2e` feature 下注册。正常开发与发布构建不包含测试 HTTP 自动化端点。
 - E2E launcher 每次只把 `.blog-editor.json` 和受控的 `hello-astro.md` 复制到新建临时目录，Rust 侧自动打开项目的环境变量入口同样只在 `e2e` feature 存在；测试结束删除临时目录，不读写手测文章和真实博客。
 - `livePreview.performance.test.ts` 预先完整解析约 1 MiB Markdown，再对约 4 KiB 可见区重复构建装饰；p95 必须低于 16 ms。完整语法树注入只服务可复现基准，生产插件仍直接使用 CodeMirror 的增量语法树。
@@ -340,7 +341,7 @@ PreviewManager、独立无权限的 preview 窗口、绑定 127.0.0.1、就绪�
 图片粘贴/拖拽、文件名冲突处理、标签索引与自动补全、项目配置 UI、删除文章及资产确认。
 当前检查点：图片粘贴/拖拽（含 WebKitGTK 原生兜底）、待提交清理、标签索引、重命名资产改写、可恢复删除、项目配置 UI、保存屏障、关闭/草稿恢复，以及实时排版核心节点和结构化块（引用、列表、任务项、表格、删除线、自动链接、分隔线、Setext 标题）均已完成。实时排版第一版的语法范围至此闭环；真实 WebKitGTK 打开/输入/模式切换/保存 smoke 与 1 MiB 长文档可见区性能预算也已落地，不继续无边界扩展语法。
 
-Linux CI 固定 Node 22、pnpm 11 与 Rust 1.88，执行前端测试（含性能预算）/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试、默认 feature 的 `tauri build --no-bundle`，并在 Xvfb 中执行测试 feature 的真实 WebKitGTK E2E。
+CI 在 GitHub Linux runner 的 `archlinux:base-devel` rolling 容器中安装 Arch 官方 `webkit2gtk-4.1`、Rust、Sway 和 `wl-clipboard`，执行前端测试（含性能预算）/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试、默认 feature 的 `tauri build --no-bundle`，最后由专用非 root 用户在 headless Sway 中执行原生 Wayland WebKitGTK E2E。测试显式清除 `DISPLAY` 并在 Sway 配置中关闭 XWayland，失败时不能回退到 X11。
 
 **阶段 5：Obsidian 式实时预览**
 ATX/Setext heading → strong → emphasis → strikethrough → inlineCode → link/autolink → fencedCode → image → horizontal rule → blockquote/list/task/table，IME/选区/复制/撤销测试作为验收的一部分，不是事后补充。

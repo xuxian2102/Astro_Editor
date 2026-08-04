@@ -21,7 +21,7 @@ pub struct ClipboardImage {
 /// 从系统剪贴板读取图片。顺序很重要：
 /// 1. 文件管理器复制的图片保留原文件名和编码；
 /// 2. Wayland 按 compositor 实际提供的 image/* MIME 取原始字节；
-/// 3. 其他平台（以及 Wayland 最后兜底）让 arboard 解码位图，再编码成 PNG。
+/// 3. Wayland 最后让 arboard 解码位图，再编码成 PNG。
 pub fn read_images() -> Result<Vec<ClipboardImage>, AppError> {
     let mut diagnostics = Vec::new();
     let mut clipboard = match Clipboard::new() {

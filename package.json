@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:perf:live-preview": "vitest run src/editor/livePreview.performance.test.ts --reporter=verbose",
     "test:e2e:build": "pnpm build && cargo build --release --manifest-path src-tauri/Cargo.toml --features e2e,custom-protocol --bin blog-editor-e2e",
-    "test:e2e": "pnpm test:e2e:build && env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 xvfb-run -a pnpm exec wdio run test/e2e/wdio.conf.mjs",
+    "test:e2e": "pnpm test:e2e:build && bash test/e2e/run-wayland.sh",
     "tauri": "tauri"
   },
   "dependencies": {

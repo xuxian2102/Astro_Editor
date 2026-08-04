@@ -1,4 +1,4 @@
-name: Linux CI
+name: Arch Wayland CI
 
 on:
   push:
@@ -13,28 +13,38 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 45
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Tauri Linux dependencies
+      - name: Install Arch Linux dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
+          pacman -Syu --noconfirm
+          pacman -S --needed --noconfirm \
+            git \
+            nodejs \
+            npm \
+            rust \
+            webkit2gtk-4.1 \
             curl \
             wget \
             file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            xvfb \
-            xauth
+            openssl \
+            appmenu-gtk-module \
+            libappindicator \
+            librsvg \
+            sway \
+            wl-clipboard \
+            dbus \
+            ttf-dejavu
+
+      - name: Checkout
+        uses: actions/checkout@v6
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -44,9 +54,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-
-      - name: Install Rust 1.88
-        run: rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -59,22 +66,27 @@ jobs:
 
       - name: Check Rust formatting
         working-directory: src-tauri
-        run: cargo +1.88.0 fmt --check
+        run: cargo fmt --check
 
       - name: Lint Rust
         working-directory: src-tauri
-        run: cargo +1.88.0 clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Test Rust
         working-directory: src-tauri
-        run: cargo +1.88.0 test --all-features
+        run: cargo test --all-features
 
       - name: Build Linux desktop binary
-        env:
-          RUSTUP_TOOLCHAIN: 1.88.0
         run: pnpm tauri build --no-bundle
 
-      - name: Test WebKitGTK desktop smoke
-        env:
-          RUSTUP_TOOLCHAIN: 1.88.0
-        run: pnpm test:e2e
+      - name: Build native Wayland E2E application
+        run: pnpm test:e2e:build
+
+      - name: Test native Wayland WebKitGTK desktop
+        run: |
+          useradd --create-home --shell /bin/bash blog-editor-e2e
+          runuser --user blog-editor-e2e -- \
+            env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
+            HOME=/home/blog-editor-e2e \
+            PATH="$PATH" \
+            bash test/e2e/run-wayland.sh

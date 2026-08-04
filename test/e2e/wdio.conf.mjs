@@ -67,7 +67,9 @@ export const config = {
       "tauri:options": { application },
     },
   ],
-  logLevel: "warn",
+  // 1.3.0 的通用诊断仍假定 Linux 需要 DISPLAY/外部 tauri-driver，会对纯
+  // Wayland + embedded provider 输出错误建议；spec reporter 和失败快照保留即可。
+  logLevel: "silent",
   bail: 0,
   waitforTimeout: 10_000,
   connectionRetryTimeout: 30_000,

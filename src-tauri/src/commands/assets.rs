@@ -66,7 +66,7 @@ pub async fn read_image_asset(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// 原生读取并保存剪贴板图片。读取系统剪贴板可能等待 Wayland/X11 provider 返回数据，
+/// 原生读取并保存剪贴板图片。读取系统剪贴板可能等待 Wayland provider 返回数据，
 /// 必须放到 blocking worker；保存阶段再进入内容锁，复用统一的路径守卫与 pending 事务。
 #[tauri::command]
 pub async fn import_clipboard_images(
