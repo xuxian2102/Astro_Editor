@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Blog Editor
+GenericName=Markdown Editor
+Comment=Write and publish an Astro blog from a native Wayland desktop
+Exec=blog-editor
+Icon=dev.xuxian.blogeditor
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=Markdown;Astro;Blog;
+StartupNotify=true

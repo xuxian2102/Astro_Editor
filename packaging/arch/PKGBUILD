@@ -1,0 +1,85 @@
+# Maintainer: xuxian
+pkgname=blog-editor-git
+pkgver=0.1.0.r12.gb63d59a
+pkgrel=1
+pkgdesc="Native Wayland Markdown editor for an Astro blog"
+arch=('x86_64')
+url="https://github.com/xuxian2102/Astro_Editor"
+license=('LicenseRef-All-Rights-Reserved')
+depends=(
+  'cairo'
+  'dbus'
+  'gcc-libs'
+  'gdk-pixbuf2'
+  'glib2'
+  'glibc'
+  'gtk3'
+  'libsoup3'
+  'nodejs'
+  'webkit2gtk-4.1'
+  'xdg-utils'
+)
+makedepends=(
+  'appmenu-gtk-module'
+  'curl'
+  'file'
+  'git'
+  'libappindicator'
+  'librsvg'
+  'openssl'
+  'pnpm'
+  'rust'
+  'wget'
+)
+optdepends=('git: enable the built-in status, commit, and push workflow')
+provides=("blog-editor=${pkgver}")
+conflicts=('blog-editor')
+source=('blog-editor::git+https://github.com/xuxian2102/Astro_Editor.git#branch=main')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/blog-editor"
+  local _version
+  _version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -n 1)
+  printf '%s.r%s.g%s' \
+    "$_version" \
+    "$(git rev-list --count HEAD)" \
+    "$(git rev-parse --short=7 HEAD)"
+}
+
+build() {
+  cd "$srcdir/blog-editor"
+  export CARGO_HOME="$srcdir/cargo-home"
+  export CARGO_TARGET_DIR="$srcdir/target"
+  export CI=1
+
+  pnpm install --frozen-lockfile
+  pnpm build
+  cargo build \
+    --locked \
+    --release \
+    --manifest-path src-tauri/Cargo.toml \
+    --features custom-protocol \
+    --bin blog-editor
+}
+
+package() {
+  cd "$srcdir/blog-editor"
+
+  install -Dm755 "$srcdir/target/release/blog-editor" \
+    "$pkgdir/usr/lib/blog-editor/blog-editor"
+  install -Dm755 packaging/arch/blog-editor.sh \
+    "$pkgdir/usr/bin/blog-editor"
+  install -Dm644 packaging/arch/dev.xuxian.blogeditor.desktop \
+    "$pkgdir/usr/share/applications/dev.xuxian.blogeditor.desktop"
+  install -Dm644 src-tauri/icons/32x32.png \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/dev.xuxian.blogeditor.png"
+  install -Dm644 src-tauri/icons/128x128.png \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/dev.xuxian.blogeditor.png"
+  install -Dm644 src-tauri/icons/128x128@2x.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/dev.xuxian.blogeditor.png"
+  install -Dm644 src-tauri/icons/icon.png \
+    "$pkgdir/usr/share/icons/hicolor/512x512/apps/dev.xuxian.blogeditor.png"
+  install -Dm644 packaging/arch/UNLICENSED \
+    "$pkgdir/usr/share/licenses/$pkgname/UNLICENSED"
+}

@@ -146,6 +146,10 @@ my-blog-editor/
 │   ├── run-wayland.sh              # 隔离 headless Wayland compositor，禁用 XWayland
 │   ├── wdio.conf.mjs               # 临时项目 + 嵌入式 Tauri WebDriver
 │   └── specs/editor-smoke.e2e.mjs  # WebKitGTK 编辑 + Wayland 图片 Ctrl+V 闭环
+├── packaging/arch/
+│   ├── PKGBUILD                    # blog-editor-git，可由 pacman 管理
+│   ├── blog-editor.sh              # 强制原生 Wayland 的启动包装器
+│   └── dev.xuxian.blogeditor.desktop
 │
 ├── package.json
 └── vite.config.ts
@@ -342,6 +346,8 @@ PreviewManager、独立无权限的 preview 窗口、绑定 127.0.0.1、就绪�
 当前检查点：图片粘贴/拖拽（含 WebKitGTK 原生兜底）、待提交清理、标签索引、重命名资产改写、可恢复删除、项目配置 UI、保存屏障、关闭/草稿恢复，以及实时排版核心节点和结构化块（引用、列表、任务项、表格、删除线、自动链接、分隔线、Setext 标题）均已完成。实时排版第一版的语法范围至此闭环；真实 WebKitGTK 打开/输入/模式切换/保存 smoke 与 1 MiB 长文档可见区性能预算也已落地，不继续无边界扩展语法。
 
 CI 在 GitHub Linux runner 的 `archlinux:base-devel` rolling 容器中安装 Arch 官方 `webkit2gtk-4.1`、Rust、Sway 和 `wl-clipboard`，执行前端测试（含性能预算）/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试、默认 feature 的 `tauri build --no-bundle`，最后由专用非 root 用户在 headless Sway 中执行原生 Wayland WebKitGTK E2E。测试显式清除 `DISPLAY` 并在 Sway 配置中关闭 XWayland，失败时不能回退到 X11。
+
+Arch 安装包位于 `packaging/arch`：`makepkg -si` 构建跟踪 GitHub `main` 的 `blog-editor-git`，安装二进制、desktop entry 与 hicolor 图标，并由 `/usr/bin/blog-editor` 包装器强制 `GDK_BACKEND=wayland`。没有 `WAYLAND_DISPLAY` 时包装器直接给出错误，不尝试 X11/XWayland。Tauri 自带 bundle 仅保留 AppImage 目标，不再生成 deb/rpm。
 
 **阶段 5：Obsidian 式实时预览**
 ATX/Setext heading → strong → emphasis → strikethrough → inlineCode → link/autolink → fencedCode → image → horizontal rule → blockquote/list/task/table，IME/选区/复制/撤销测试作为验收的一部分，不是事后补充。
