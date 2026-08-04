@@ -19,6 +19,7 @@
     "allow-ensure-preview-server",
     "allow-stop-preview-server",
     "allow-get-preview-status",
-    "opener:allow-open-url"
+    "opener:allow-open-url",
+    "clipboard-manager:allow-read-image"
   ]
 }

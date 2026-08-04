@@ -19,7 +19,7 @@ import {
 } from "@codemirror/language";
 import {
   extractDroppedImages,
-  extractPastedImage,
+  insertClipboardImageIfPresent,
   insertImagesSequentially,
 } from "./imagePaste";
 
@@ -86,19 +86,20 @@ export default function MarkdownEditor({
           }
         }),
         EditorView.domEventHandlers({
-          paste(event, view) {
-            const file = extractPastedImage(event.clipboardData);
-            if (!file) return false;
-            event.preventDefault();
-            const pos = view.state.selection.main.head;
-            void insertImagesSequentially(
-              view,
-              postIdRef.current,
-              [{ file, suggestedName: null }],
-              pos,
-              onImageErrorRef.current,
-            );
-            return true;
+          // WebKitGTK 的 ClipboardEvent.clipboardData 读不到图片（WebKit bug 218519），
+          // 所以图片粘贴不走 paste 事件，改成在按键时用原生剪贴板插件主动查一次。
+          // 这里始终不拦截默认行为——剪贴板没有图片时让 CodeMirror 自己处理文本粘贴。
+          keydown(event, view) {
+            if ((event.ctrlKey || event.metaKey) && event.key === "v") {
+              const pos = view.state.selection.main.head;
+              void insertClipboardImageIfPresent(
+                view,
+                postIdRef.current,
+                pos,
+                onImageErrorRef.current,
+              );
+            }
+            return false;
           },
           drop(event, view) {
             const images = extractDroppedImages(event.dataTransfer);
@@ -112,7 +113,7 @@ export default function MarkdownEditor({
             void insertImagesSequentially(
               view,
               postIdRef.current,
-              images.map((file) => ({ file, suggestedName: file.name })),
+              images,
               pos,
               onImageErrorRef.current,
             );
