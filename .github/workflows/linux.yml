@@ -42,6 +42,10 @@ jobs:
             wl-clipboard \
             dbus \
             ttf-dejavu
+          # Arch 给 sway 二进制附加 cap_sys_nice；GitHub 容器的 capability
+          # bounding set 不含它，非 root execve 会返回 EPERM。headless pixman
+          # compositor 不需要实时调度能力，只在这个隔离 CI 容器里移除。
+          setcap -r /usr/bin/sway
 
       - name: Checkout
         uses: actions/checkout@v6
