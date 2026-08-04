@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use tauri::State;
 
 use super::current_project;
@@ -58,4 +60,10 @@ pub async fn rename_post(
 ) -> Result<PostSummary, AppError> {
     let ctx = current_project(&state)?;
     posts::rename_post(&ctx, &old_id, &new_id)
+}
+
+#[tauri::command]
+pub async fn list_tags(state: State<'_, AppState>) -> Result<HashMap<String, Vec<String>>, AppError> {
+    let ctx = current_project(&state)?;
+    posts::list_tags(&ctx)
 }

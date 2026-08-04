@@ -11,6 +11,8 @@ fn main() {
                 "write_post",
                 "create_post",
                 "rename_post",
+                "list_tags",
+                "save_image",
                 "git_status",
                 "git_publish",
                 "ensure_preview_server",

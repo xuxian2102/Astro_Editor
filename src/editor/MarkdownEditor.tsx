@@ -17,29 +17,42 @@ import {
   defaultHighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
+import {
+  extractDroppedImages,
+  extractPastedImage,
+  insertImagesSequentially,
+} from "./imagePaste";
 
 interface MarkdownEditorProps {
   /** 变化时整个重建编辑器状态（换文章 / 外部重载） */
   sessionKey: string;
+  postId: string;
   initialBody: string;
   onChange: (body: string) => void;
   onSave: () => void;
+  onImageError: (message: string) => void;
 }
 
 /** 基础 CodeMirror 6，阶段 5 才引入实时预览 ViewPlugin */
 export default function MarkdownEditor({
   sessionKey,
+  postId,
   initialBody,
   onChange,
   onSave,
+  onImageError,
 }: MarkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const initialBodyRef = useRef(initialBody);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
+  const postIdRef = useRef(postId);
+  const onImageErrorRef = useRef(onImageError);
   initialBodyRef.current = initialBody;
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+  postIdRef.current = postId;
+  onImageErrorRef.current = onImageError;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -71,6 +84,40 @@ export default function MarkdownEditor({
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString());
           }
+        }),
+        EditorView.domEventHandlers({
+          paste(event, view) {
+            const file = extractPastedImage(event.clipboardData);
+            if (!file) return false;
+            event.preventDefault();
+            const pos = view.state.selection.main.head;
+            void insertImagesSequentially(
+              view,
+              postIdRef.current,
+              [{ file, suggestedName: null }],
+              pos,
+              onImageErrorRef.current,
+            );
+            return true;
+          },
+          drop(event, view) {
+            const images = extractDroppedImages(event.dataTransfer);
+            if (images.length === 0) return false;
+            event.preventDefault();
+            const coords = view.posAtCoords({
+              x: event.clientX,
+              y: event.clientY,
+            });
+            const pos = coords ?? view.state.selection.main.head;
+            void insertImagesSequentially(
+              view,
+              postIdRef.current,
+              images.map((file) => ({ file, suggestedName: file.name })),
+              pos,
+              onImageErrorRef.current,
+            );
+            return true;
+          },
         }),
       ],
     });

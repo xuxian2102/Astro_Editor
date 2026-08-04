@@ -12,6 +12,8 @@
     "allow-write-post",
     "allow-create-post",
     "allow-rename-post",
+    "allow-list-tags",
+    "allow-save-image",
     "allow-git-status",
     "allow-git-publish",
     "allow-ensure-preview-server",

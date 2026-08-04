@@ -9,6 +9,8 @@ interface FrontmatterFormProps {
   /** 对 fmDoc 施加一次修改并把 session 标记为 fmDirty */
   onEdit: (mutate: (fm: FrontmatterDocument) => void) => void;
   onAddFrontmatter: () => void;
+  /** 按字段名分组的标签候选（同一项目可能有多个 type:"tags" 字段，各自的候选不混） */
+  tagSuggestions: Record<string, string[]>;
 }
 
 export default function FrontmatterForm({
@@ -16,6 +18,7 @@ export default function FrontmatterForm({
   session,
   onEdit,
   onAddFrontmatter,
+  tagSuggestions,
 }: FrontmatterFormProps) {
   const fm = session.fmDoc;
 
@@ -40,7 +43,7 @@ export default function FrontmatterForm({
               <em className="fm-required">必填</em>
             )}
           </span>
-          {renderControl(field, fm, onEdit)}
+          {renderControl(field, fm, onEdit, tagSuggestions)}
         </label>
       ))}
       {fields.length === 0 && (
@@ -55,6 +58,7 @@ function renderControl(
   field: FieldSpec,
   fm: FrontmatterDocument,
   onEdit: FrontmatterFormProps["onEdit"],
+  tagSuggestions: Record<string, string[]>,
 ) {
   switch (field.type) {
     case "boolean":
@@ -78,6 +82,7 @@ function renderControl(
         <TagEditor
           value={fm.getTags(field.name)}
           onChange={(tags) => onEdit((d) => d.set(field.name, tags))}
+          suggestions={tagSuggestions[field.name] ?? []}
         />
       );
     default:

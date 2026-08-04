@@ -140,4 +140,9 @@ export const api = {
     invoke<PreviewStatus>("ensure_preview_server", { postId }),
   stopPreviewServer: () => invoke<PreviewStatus>("stop_preview_server"),
   getPreviewStatus: () => invoke<PreviewStatus>("get_preview_status"),
+  /** 按字段名分组的标签索引，比如 { tags: [...], categories: [...] } */
+  listTags: () => invoke<Record<string, string[]>>("list_tags"),
+  /** bytes 是原始字节数组；返回可以直接写进 Markdown 的相对路径，如 "hello-astro/cover.png" */
+  saveImage: (postId: string, suggestedName: string | null, bytes: number[]) =>
+    invoke<string>("save_image", { postId, suggestedName, bytes }),
 };

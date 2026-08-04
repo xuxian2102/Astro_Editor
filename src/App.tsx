@@ -40,9 +40,18 @@ export default function App() {
   const [gitStatusError, setGitStatusError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+  const [tagSuggestions, setTagSuggestions] = useState<Record<string, string[]>>({});
 
   const refreshPosts = useCallback(async () => {
     setPosts(await api.listPosts());
+  }, []);
+
+  const refreshTags = useCallback(async () => {
+    try {
+      setTagSuggestions(await api.listTags());
+    } catch {
+      // 标签索引只是辅助功能，读取失败不打断主流程
+    }
   }, []);
 
   /** git_status 失败（比如项目不是 git 仓库）只在 GitPanel 里提示，不打全局 error banner */
@@ -65,10 +74,11 @@ export default function App() {
           setProject(p);
           await refreshPosts();
           await refreshGitStatus();
+          await refreshTags();
         }
       })
       .catch(() => {});
-  }, [refreshPosts, refreshGitStatus]);
+  }, [refreshPosts, refreshGitStatus, refreshTags]);
 
   const run = useCallback(async (action: () => Promise<void>) => {
     setError(null);
@@ -88,6 +98,7 @@ export default function App() {
       setPublishResult(null);
       await refreshPosts();
       await refreshGitStatus();
+      await refreshTags();
     });
 
   const doOpenPost = useCallback(
@@ -122,6 +133,7 @@ export default function App() {
         setSession(afterSave(session, fm, revision));
         await refreshPosts();
         await refreshGitStatus();
+        await refreshTags();
       } catch (e) {
         if (isAppError(e) && e.code === "external_modification_conflict") {
           setModal({ kind: "conflict" });
@@ -130,7 +142,7 @@ export default function App() {
         throw e;
       }
     }).finally(() => setSaving(false));
-  }, [session, saving, run, refreshPosts, refreshGitStatus]);
+  }, [session, saving, run, refreshPosts, refreshGitStatus, refreshTags]);
 
   /** 冲突：放弃本地改动，重新加载磁盘内容 */
   const conflictReload = () => {
@@ -154,6 +166,7 @@ export default function App() {
       setSession(afterSave(session, fm, revision));
       await refreshPosts();
       await refreshGitStatus();
+      await refreshTags();
     });
   };
 
@@ -169,6 +182,7 @@ export default function App() {
       });
       await refreshPosts();
       await refreshGitStatus();
+      await refreshTags();
       setSession(sessionFromDocument(doc));
     });
 
@@ -274,9 +288,11 @@ export default function App() {
         {session ? (
           <MarkdownEditor
             sessionKey={`${session.id}@${session.revision}`}
+            postId={session.id}
             initialBody={session.body}
             onChange={handleBodyChange}
             onSave={handleSave}
+            onImageError={setError}
           />
         ) : (
           <div className="empty-state">
@@ -295,6 +311,7 @@ export default function App() {
             session={session}
             onEdit={handleFmEdit}
             onAddFrontmatter={handleAddFrontmatter}
+            tagSuggestions={tagSuggestions}
           />
         </aside>
       )}

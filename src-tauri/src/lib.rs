@@ -33,6 +33,8 @@ pub fn run() {
             commands::posts::write_post,
             commands::posts::create_post,
             commands::posts::rename_post,
+            commands::posts::list_tags,
+            commands::assets::save_image,
             commands::git::git_status,
             commands::git::git_publish,
             commands::preview::ensure_preview_server,

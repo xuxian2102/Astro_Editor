@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write as _;
 use std::path::Path;
@@ -7,6 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::error::AppError;
 use crate::model::{PostDocument, PostSummary, ProjectContext};
 use crate::path_guard::resolve_post_path;
+use crate::services::preview::resolve_slug;
 
 pub fn revision_of(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
@@ -56,6 +58,52 @@ pub fn join_markdown(raw_frontmatter: Option<&str>, body: &str) -> String {
             s
         }
     }
+}
+
+/// 按 frontmatter.fields 里 type=="tags" 的字段名分组建索引（一个项目可能配置不止一个
+/// 标签类字段，比如 tags 和 categories，各自的候选值不应该混在一起）。
+/// 单篇文章 YAML 损坏时跳过继续，不因为一篇文章拖垮整个索引。
+pub fn list_tags(ctx: &ProjectContext) -> Result<HashMap<String, Vec<String>>, AppError> {
+    let tag_fields: Vec<&str> = ctx
+        .config
+        .frontmatter
+        .fields
+        .iter()
+        .filter(|f| f.field_type == "tags")
+        .map(|f| f.name.as_str())
+        .collect();
+    if tag_fields.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut sets: HashMap<&str, std::collections::BTreeSet<String>> =
+        tag_fields.iter().map(|&f| (f, Default::default())).collect();
+
+    for post in list_posts(ctx)? {
+        let Ok(text) = fs::read_to_string(ctx.content_root.join(&post.id)) else {
+            continue;
+        };
+        let Some(fm) = split_markdown(&text).0 else {
+            continue;
+        };
+        let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(fm) else {
+            continue;
+        };
+        for &field in &tag_fields {
+            if let Some(serde_yaml::Value::Sequence(seq)) = value.get(field) {
+                for item in seq {
+                    if let Some(s) = item.as_str() {
+                        sets.get_mut(field).unwrap().insert(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(sets
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.into_iter().collect()))
+        .collect())
 }
 
 pub fn list_posts(ctx: &ProjectContext) -> Result<Vec<PostSummary>, AppError> {
@@ -193,10 +241,31 @@ pub fn rename_post(
     if new_path.exists() {
         return Err(AppError::AlreadyExists(new_id.to_owned()));
     }
+
+    // 图片按"每篇文章一个同名子目录"存放（见 services::assets），重命名文章时一并跟着走，
+    // 否则正文里的相对图片引用会失效。没有资产目录（这篇文章从没插过图片）就跳过，不是错误。
+    // 先检查/搬资产目录，再搬 .md 本体——这样万一资产目录冲突，.md 还没动，不会留下半改状态
+    let old_asset_dir = ctx.content_root.join(resolve_slug(old_id));
+    let new_asset_dir = ctx.content_root.join(resolve_slug(new_id));
+    let has_assets = old_asset_dir.is_dir();
+    if has_assets && new_asset_dir.exists() {
+        return Err(AppError::AlreadyExists(format!(
+            "资产目录已存在：{}",
+            new_asset_dir.display()
+        )));
+    }
+
     if let Some(parent) = new_path.parent() {
         fs::create_dir_all(parent)?;
     }
+    if has_assets {
+        if let Some(parent) = new_asset_dir.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(&old_asset_dir, &new_asset_dir)?;
+    }
     fs::rename(&old_path, &new_path)?;
+
     let modified_ms = fs::metadata(&new_path)
         .ok()
         .and_then(|m| m.modified().ok())
@@ -340,6 +409,47 @@ mod tests {
     }
 
     #[test]
+    fn rename_post_moves_asset_dir_when_present() {
+        let (_dir, ctx) = ctx();
+        create_post(&ctx, "hello.md", None, "body").unwrap();
+        std::fs::create_dir_all(ctx.content_root.join("hello")).unwrap();
+        std::fs::write(ctx.content_root.join("hello/cover.png"), "img").unwrap();
+
+        rename_post(&ctx, "hello.md", "renamed.md").unwrap();
+
+        assert!(!ctx.content_root.join("hello").exists());
+        assert_eq!(
+            std::fs::read_to_string(ctx.content_root.join("renamed/cover.png")).unwrap(),
+            "img"
+        );
+    }
+
+    #[test]
+    fn rename_post_without_asset_dir_still_succeeds() {
+        let (_dir, ctx) = ctx();
+        create_post(&ctx, "hello.md", None, "body").unwrap();
+        // 从没插过图片，没有 hello/ 目录——重命名应该照常成功，不能因为目录不存在而报错
+        let summary = rename_post(&ctx, "hello.md", "renamed.md").unwrap();
+        assert_eq!(summary.id, "renamed.md");
+    }
+
+    #[test]
+    fn rename_post_rejects_when_target_asset_dir_already_taken() {
+        let (_dir, ctx) = ctx();
+        create_post(&ctx, "a.md", None, "body").unwrap();
+        std::fs::create_dir_all(ctx.content_root.join("a")).unwrap();
+        std::fs::write(ctx.content_root.join("a/img.png"), "1").unwrap();
+
+        // 目标资产目录 "b/" 已经被别的东西占用（比如另一篇文章遗留的资产目录）
+        std::fs::create_dir_all(ctx.content_root.join("b")).unwrap();
+
+        let err = rename_post(&ctx, "a.md", "b.md").unwrap_err();
+        assert!(matches!(err, AppError::AlreadyExists(_)));
+        // 冲突时 .md 本体不应该已经被搬走（先检查资产目录，再动 .md）
+        assert!(ctx.content_root.join("a.md").is_file());
+    }
+
+    #[test]
     fn create_rejects_existing_and_rename_rejects_overwrite() {
         let (_dir, ctx) = ctx();
         create_post(&ctx, "a.md", Some("title: a\n"), "\nbody\n").unwrap();
@@ -406,5 +516,90 @@ mod tests {
 
         let ids: Vec<String> = list_posts(&ctx).unwrap().into_iter().map(|p| p.id).collect();
         assert_eq!(ids, vec!["a.md".to_string(), "nested/b.md".to_string()]);
+    }
+
+    fn ctx_with_tag_fields(field_names: &[&str]) -> (tempfile::TempDir, ProjectContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let content_root = dir.path().canonicalize().unwrap();
+        let mut config = ProjectConfig::default();
+        config.frontmatter.fields = field_names
+            .iter()
+            .map(|name| crate::model::FieldSpec {
+                name: name.to_string(),
+                field_type: "tags".into(),
+                required: false,
+                default: None,
+            })
+            .collect();
+        let ctx = ProjectContext {
+            root: content_root.clone(),
+            content_root,
+            config,
+        };
+        (dir, ctx)
+    }
+
+    #[test]
+    fn list_tags_dedupes_and_sorts_across_posts() {
+        let (_dir, ctx) = ctx_with_tag_fields(&["tags"]);
+        std::fs::write(
+            ctx.content_root.join("a.md"),
+            "---\ntags: [astro, rust]\n---\nbody",
+        )
+        .unwrap();
+        std::fs::write(
+            ctx.content_root.join("b.md"),
+            "---\ntags: [rust, zig]\n---\nbody",
+        )
+        .unwrap();
+
+        let tags = list_tags(&ctx).unwrap();
+        assert_eq!(
+            tags.get("tags").unwrap(),
+            &vec!["astro".to_string(), "rust".to_string(), "zig".to_string()]
+        );
+    }
+
+    #[test]
+    fn list_tags_keeps_different_tag_fields_separate() {
+        let (_dir, ctx) = ctx_with_tag_fields(&["tags", "categories"]);
+        std::fs::write(
+            ctx.content_root.join("a.md"),
+            "---\ntags: [astro]\ncategories: [教程]\n---\nbody",
+        )
+        .unwrap();
+
+        let tags = list_tags(&ctx).unwrap();
+        assert_eq!(tags.get("tags").unwrap(), &vec!["astro".to_string()]);
+        assert_eq!(tags.get("categories").unwrap(), &vec!["教程".to_string()]);
+    }
+
+    #[test]
+    fn list_tags_skips_malformed_frontmatter_without_failing() {
+        let (_dir, ctx) = ctx_with_tag_fields(&["tags"]);
+        std::fs::write(
+            ctx.content_root.join("broken.md"),
+            "---\ntags: [unclosed\n---\nbody",
+        )
+        .unwrap();
+        std::fs::write(
+            ctx.content_root.join("ok.md"),
+            "---\ntags: [astro]\n---\nbody",
+        )
+        .unwrap();
+
+        let tags = list_tags(&ctx).unwrap();
+        assert_eq!(tags.get("tags").unwrap(), &vec!["astro".to_string()]);
+    }
+
+    #[test]
+    fn list_tags_empty_when_no_tags_field_configured() {
+        let (_dir, ctx) = ctx(); // 默认配置没有任何 frontmatter 字段
+        std::fs::write(
+            ctx.content_root.join("a.md"),
+            "---\ntags: [astro]\n---\nbody",
+        )
+        .unwrap();
+        assert!(list_tags(&ctx).unwrap().is_empty());
     }
 }

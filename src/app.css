@@ -392,6 +392,43 @@ input {
   padding: 2px;
 }
 
+.tag-editor-wrap {
+  position: relative;
+}
+
+.tag-suggestions {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.tag-suggestion {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.tag-suggestion.active,
+.tag-suggestion:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
