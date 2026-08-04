@@ -29,6 +29,20 @@ export class CodeLanguageWidget extends WidgetType {
   }
 }
 
+export class HorizontalRuleWidget extends WidgetType {
+  eq(_other: HorizontalRuleWidget) {
+    return true;
+  }
+
+  toDOM() {
+    const separator = document.createElement("span");
+    separator.className = "cm-live-horizontal-rule";
+    separator.setAttribute("role", "separator");
+    separator.setAttribute("aria-label", "分隔线");
+    return separator;
+  }
+}
+
 export class ListMarkerWidget extends WidgetType {
   constructor(
     readonly label: string,

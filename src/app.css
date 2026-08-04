@@ -357,6 +357,12 @@ input[readonly] {
   font-style: italic;
 }
 
+.editor-host .cm-live-strikethrough {
+  color: var(--fg-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
 .editor-host .cm-live-inline-code {
   padding: 0.08em 0.28em;
   border-radius: 4px;
@@ -370,6 +376,30 @@ input[readonly] {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent);
   text-underline-offset: 0.16em;
+}
+
+.editor-host .cm-line.cm-live-setext-underline {
+  height: 0;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 0;
+}
+
+.editor-host .cm-live-horizontal-rule {
+  display: inline-flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 4rem;
+  height: 1.7em;
+  align-items: center;
+  vertical-align: top;
+}
+
+.editor-host .cm-live-horizontal-rule::before {
+  width: 100%;
+  border-top: 1px solid color-mix(in srgb, var(--fg-muted) 55%, var(--border));
+  content: "";
 }
 
 .editor-host .cm-line.cm-live-code-line {

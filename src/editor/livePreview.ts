@@ -14,6 +14,7 @@ import {
 import { decorateStructuralNode } from "./livePreviewStructural";
 import {
   CodeLanguageWidget,
+  HorizontalRuleWidget,
   MarkdownImageWidget,
   type LivePreviewImageState,
   type MarkdownImageDescriptor,
@@ -28,11 +29,17 @@ type PreviewOwner =
   | "heading"
   | "strong"
   | "emphasis"
+  | "strikethrough"
   | "inline-code"
   | "link"
+  | "autolink"
   | "fenced-code"
-  | "image";
-type HiddenSyntaxOwner = Exclude<PreviewOwner, "image">;
+  | "image"
+  | "horizontal-rule";
+type HiddenSyntaxOwner = Exclude<
+  PreviewOwner,
+  "image" | "horizontal-rule"
+>;
 
 export interface LivePreviewConfig {
   /** 本地相对图片由宿主按项目安全边界读取；远程/data URL 由插件直接交给 img。 */
@@ -44,6 +51,8 @@ export interface LivePreviewBuildOptions {
   visibleRanges: readonly VisibleRange[];
   composing: boolean;
   resolveImage?: (markdownPath: string) => LivePreviewImageState;
+  /** 性能基准可注入 ensureSyntaxTree 返回的完整树；正常编辑器始终省略。 */
+  tree?: ReturnType<typeof syntaxTree>;
 }
 
 export interface LivePreviewDecorationResult {
@@ -66,6 +75,10 @@ const hiddenSyntaxByOwner: Record<HiddenSyntaxOwner, Decoration> = {
     livePreviewKind: "syntax",
     livePreviewOwner: "emphasis",
   }),
+  strikethrough: Decoration.replace({
+    livePreviewKind: "syntax",
+    livePreviewOwner: "strikethrough",
+  }),
   "inline-code": Decoration.replace({
     livePreviewKind: "syntax",
     livePreviewOwner: "inline-code",
@@ -73,6 +86,10 @@ const hiddenSyntaxByOwner: Record<HiddenSyntaxOwner, Decoration> = {
   link: Decoration.replace({
     livePreviewKind: "syntax",
     livePreviewOwner: "link",
+  }),
+  autolink: Decoration.replace({
+    livePreviewKind: "syntax",
+    livePreviewOwner: "autolink",
   }),
   "fenced-code": Decoration.replace({
     livePreviewKind: "syntax",
@@ -92,6 +109,12 @@ const emphasisContent = Decoration.mark({
   livePreviewOwner: "emphasis",
 });
 
+const strikethroughContent = Decoration.mark({
+  class: "cm-live-strikethrough",
+  livePreviewKind: "content",
+  livePreviewOwner: "strikethrough",
+});
+
 const inlineCodeContent = Decoration.mark({
   class: "cm-live-inline-code",
   livePreviewKind: "content",
@@ -106,6 +129,12 @@ const headingLines = Array.from({ length: 6 }, (_, index) => {
     livePreviewOwner: "heading",
     livePreviewLevel: level,
   });
+});
+
+const setextUnderlineLine = Decoration.line({
+  class: "cm-live-setext-underline",
+  livePreviewKind: "line",
+  livePreviewOwner: "heading",
 });
 
 const codeLineStart = Decoration.line({
@@ -159,6 +188,12 @@ function directChild(node: SyntaxNode, name: string): SyntaxNode | null {
   return null;
 }
 
+function hasAncestorNamed(node: SyntaxNode, names: readonly string[]): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if (names.includes(current.name)) return true;
+  }
+  return false;
+}
 
 function headingMarkerRanges(
   state: EditorState,
@@ -277,13 +312,7 @@ function addLinkNode(
 
   if (labelFrom < labelTo) {
     visualRanges.push(
-      Decoration.mark({
-        class: "cm-live-link",
-        attributes: target ? { title: target } : undefined,
-        livePreviewKind: "content",
-        livePreviewOwner: "link",
-        livePreviewTarget: target,
-      }).range(labelFrom, labelTo),
+      linkContentDecoration("link", target).range(labelFrom, labelTo),
     );
   }
 
@@ -309,6 +338,126 @@ function addLinkNode(
     visualRanges,
     atomicRanges,
   );
+}
+
+function linkContentDecoration(owner: "link" | "autolink", target: string) {
+  return Decoration.mark({
+    class: "cm-live-link",
+    attributes: target ? { title: target } : undefined,
+    livePreviewKind: "content",
+    livePreviewOwner: owner,
+    livePreviewTarget: target,
+  });
+}
+
+function addAutolinkNode(
+  node: SyntaxNode,
+  options: LivePreviewBuildOptions,
+  visualRanges: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  const markers = directChildRanges(node, "LinkMark");
+  const url = directChild(node, "URL");
+  if (markers.length < 2 || !url) return;
+
+  const target = options.state.sliceDoc(url.from, url.to);
+  visualRanges.push(
+    linkContentDecoration("autolink", target).range(url.from, url.to),
+  );
+
+  if (
+    options.composing ||
+    selectionIntersectsNode(options.state, node.from, node.to)
+  ) {
+    return;
+  }
+  addHiddenMarkers(
+    "autolink",
+    markers,
+    options.state,
+    visualRanges,
+    atomicRanges,
+  );
+}
+
+function addBareUrlNode(
+  node: SyntaxNode,
+  options: LivePreviewBuildOptions,
+  visualRanges: Range<Decoration>[],
+) {
+  // URL 也用于普通链接、图片与引用定义的目标；这些已有各自的渲染规则。
+  if (
+    hasAncestorNamed(node, ["Link", "Image", "Autolink", "LinkReference"])
+  ) {
+    return;
+  }
+  const target = options.state.sliceDoc(node.from, node.to);
+  visualRanges.push(
+    linkContentDecoration("autolink", target).range(node.from, node.to),
+  );
+}
+
+function addSetextHeadingNode(
+  node: SyntaxNode,
+  level: 1 | 2,
+  options: LivePreviewBuildOptions,
+  visualRanges: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  const marker = directChild(node, "HeaderMark");
+  if (!marker) return;
+
+  const firstLineNumber = options.state.doc.lineAt(node.from).number;
+  const markerLine = options.state.doc.lineAt(marker.from);
+  for (
+    let lineNumber = firstLineNumber;
+    lineNumber < markerLine.number;
+    lineNumber += 1
+  ) {
+    visualRanges.push(
+      headingLines[level - 1].range(options.state.doc.line(lineNumber).from),
+    );
+  }
+
+  if (
+    options.composing ||
+    selectionIntersectsNode(options.state, node.from, node.to)
+  ) {
+    return;
+  }
+
+  // replacement 不能跨换行；隐藏并折叠完整下划线行，避免留下一个空白行。
+  addHiddenRange(
+    "heading",
+    markerLine.from,
+    markerLine.to,
+    options.state,
+    visualRanges,
+    atomicRanges,
+  );
+  visualRanges.push(setextUnderlineLine.range(markerLine.from));
+}
+
+function addHorizontalRuleNode(
+  node: SyntaxNode,
+  options: LivePreviewBuildOptions,
+  visualRanges: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  const line = options.state.doc.lineAt(node.from);
+  if (
+    options.composing ||
+    selectionIntersectsNode(options.state, line.from, line.to)
+  ) {
+    return;
+  }
+  const range = Decoration.replace({
+    widget: new HorizontalRuleWidget(),
+    livePreviewKind: "horizontal-rule",
+    livePreviewOwner: "horizontal-rule",
+  }).range(line.from, line.to);
+  visualRanges.push(range);
+  atomicRanges.push(range);
 }
 
 function addFencedCodeNode(
@@ -493,7 +642,7 @@ export function buildLivePreviewDecorations(
   const visualRanges: Range<Decoration>[] = [];
   const atomicRanges: Range<Decoration>[] = [];
   const seenNodes = new Set<string>();
-  const tree = syntaxTree(options.state);
+  const tree = options.tree ?? syntaxTree(options.state);
 
   for (const visibleRange of options.visibleRanges) {
     tree.iterate({
@@ -523,6 +672,18 @@ export function buildLivePreviewDecorations(
               atomicRanges,
             );
           }
+          return;
+        }
+
+        const setextHeadingMatch = /^SetextHeading([12])$/.exec(node.name);
+        if (setextHeadingMatch) {
+          addSetextHeadingNode(
+            node,
+            Number(setextHeadingMatch[1]) as 1 | 2,
+            options,
+            visualRanges,
+            atomicRanges,
+          );
           return;
         }
 
@@ -560,6 +721,17 @@ export function buildLivePreviewDecorations(
               atomicRanges,
             );
             break;
+          case "Strikethrough":
+            addDelimitedNode(
+              node,
+              "StrikethroughMark",
+              "strikethrough",
+              strikethroughContent,
+              options,
+              visualRanges,
+              atomicRanges,
+            );
+            break;
           case "InlineCode":
             addDelimitedNode(
               node,
@@ -574,6 +746,12 @@ export function buildLivePreviewDecorations(
           case "Link":
             addLinkNode(node, options, visualRanges, atomicRanges);
             break;
+          case "Autolink":
+            addAutolinkNode(node, options, visualRanges, atomicRanges);
+            return false;
+          case "URL":
+            addBareUrlNode(node, options, visualRanges);
+            break;
           case "FencedCode":
             addFencedCodeNode(node, options, visualRanges, atomicRanges);
             break;
@@ -581,6 +759,14 @@ export function buildLivePreviewDecorations(
             if (addImageNode(node, options, visualRanges, atomicRanges)) {
               return false;
             }
+            break;
+          case "HorizontalRule":
+            addHorizontalRuleNode(
+              node,
+              options,
+              visualRanges,
+              atomicRanges,
+            );
             break;
         }
       },

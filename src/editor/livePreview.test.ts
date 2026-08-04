@@ -184,6 +184,44 @@ describe("live preview decorations", () => {
     expect(owners).toEqual(expect.arrayContaining(["strong", "emphasis"]));
   });
 
+  it("renders strikethrough while preserving nested inline formatting", () => {
+    const doc = "旧 ~~删除 **内容**~~ 新，光标";
+    const state = createState(doc, doc.length);
+    const result = build(state);
+    const visual = snapshots(result.decorations, state);
+    const strikeSyntax = visual.filter(
+      (item) => item.kind === "syntax" && item.owner === "strikethrough",
+    );
+
+    expect(strikeSyntax.map((item) => item.text)).toEqual(["~~", "~~"]);
+    expect(visual).toContainEqual(
+      expect.objectContaining({
+        kind: "content",
+        owner: "strikethrough",
+        text: "删除 **内容**",
+        className: "cm-live-strikethrough",
+      }),
+    );
+    expect(visual).toContainEqual(
+      expect.objectContaining({
+        kind: "content",
+        owner: "strong",
+        text: "内容",
+      }),
+    );
+    expect(snapshots(result.atomicRanges, state)).toEqual(
+      expect.arrayContaining(strikeSyntax),
+    );
+
+    const activeState = createState(doc, doc.indexOf("删除") + 1);
+    expect(
+      snapshots(build(activeState).decorations, activeState).some(
+        (item) => item.kind === "syntax" && item.owner === "strikethrough",
+      ),
+    ).toBe(false);
+    expect(state.doc.toString()).toBe(doc);
+  });
+
   it("handles empty and closing-marker headings without overlapping ranges", () => {
     const doc = "# #\n\n光标";
     const state = createState(doc, doc.length);
@@ -262,6 +300,125 @@ describe("live preview decorations", () => {
         (item) => item.kind === "content" && item.owner === "link",
       ),
     ).toBe(true);
+  });
+
+  it("styles angle and bare autolinks without decorating reference targets", () => {
+    const doc =
+      "访问 <https://example.com/docs> www.example.com user@example.com\n\n[id]: https://definition.example\n\n光标";
+    const state = createState(doc, doc.length);
+    const result = build(state);
+    const visual = snapshots(result.decorations, state);
+    const autolinks = visual.filter(
+      (item) => item.kind === "content" && item.owner === "autolink",
+    );
+    const syntax = visual.filter(
+      (item) => item.kind === "syntax" && item.owner === "autolink",
+    );
+
+    expect(autolinks.map((item) => [item.text, item.target])).toEqual([
+      ["https://example.com/docs", "https://example.com/docs"],
+      ["www.example.com", "www.example.com"],
+      ["user@example.com", "user@example.com"],
+    ]);
+    expect(syntax.map((item) => item.text)).toEqual(["<", ">"]);
+    expect(
+      autolinks.some((item) => item.text === "https://definition.example"),
+    ).toBe(false);
+    expect(snapshots(result.atomicRanges, state)).toEqual(
+      expect.arrayContaining(syntax),
+    );
+
+    const activeState = createState(
+      doc,
+      doc.indexOf("https://example.com/docs") + 3,
+    );
+    const activeVisual = snapshots(
+      build(activeState).decorations,
+      activeState,
+    );
+    expect(
+      activeVisual.some(
+        (item) => item.kind === "syntax" && item.owner === "autolink",
+      ),
+    ).toBe(false);
+    expect(
+      activeVisual.some(
+        (item) => item.kind === "content" && item.owner === "autolink",
+      ),
+    ).toBe(true);
+  });
+
+  it("renders Setext headings and collapses only their underline lines", () => {
+    const doc = "一级标题\n===\n\n二级 **标题**\n---\n\n光标";
+    const state = createState(doc, doc.length);
+    const result = build(state);
+    const visual = snapshots(result.decorations, state);
+    const headingLines = visual.filter(
+      (item) =>
+        item.kind === "line" &&
+        item.owner === "heading" &&
+        item.className?.includes("cm-live-heading"),
+    );
+    const hidden = visual.filter(
+      (item) => item.kind === "syntax" && item.owner === "heading",
+    );
+    const collapsed = visual.filter(
+      (item) => item.className === "cm-live-setext-underline",
+    );
+
+    expect(headingLines.map((item) => item.level)).toEqual([1, 2]);
+    expect(hidden.map((item) => item.text)).toEqual(["===", "---"]);
+    expect(collapsed).toHaveLength(2);
+    expect(
+      visual.some((item) => item.kind === "horizontal-rule"),
+    ).toBe(false);
+    expect(snapshots(result.atomicRanges, state)).toEqual(
+      expect.arrayContaining(hidden),
+    );
+
+    const activeState = createState(doc, doc.indexOf("二级") + 1);
+    const activeVisual = snapshots(
+      build(activeState).decorations,
+      activeState,
+    );
+    expect(
+      activeVisual.filter(
+        (item) => item.kind === "syntax" && item.owner === "heading",
+      ).map((item) => item.text),
+    ).toEqual(["==="]);
+    expect(
+      activeVisual.filter(
+        (item) => item.className === "cm-live-setext-underline",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("replaces standalone horizontal rules and restores their source for editing", () => {
+    const doc = "上方\n\n---\n\n  * * *  \n\n下方光标";
+    const state = createState(doc, doc.length);
+    const result = build(state);
+    const rules = snapshots(result.decorations, state).filter(
+      (item) => item.kind === "horizontal-rule",
+    );
+
+    expect(rules.map((item) => item.text)).toEqual(["---", "  * * *  "]);
+    expect(rules.every((item) => item.owner === "horizontal-rule")).toBe(true);
+    expect(snapshots(result.atomicRanges, state)).toEqual(
+      expect.arrayContaining(rules),
+    );
+
+    const activeState = createState(doc, doc.indexOf("---") + 1);
+    expect(
+      snapshots(build(activeState).decorations, activeState)
+        .filter((item) => item.kind === "horizontal-rule")
+        .map((item) => item.text),
+    ).toEqual(["  * * *  "]);
+    expect(
+      snapshots(build(state, true).decorations, state).some(
+        (item) => item.kind === "horizontal-rule",
+      ),
+    ).toBe(false);
+    expect(state.doc.toString()).toBe(doc);
   });
 
   it("styles fenced code lines and replaces only the two fence lines", () => {

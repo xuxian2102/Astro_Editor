@@ -94,7 +94,8 @@ my-blog-editor/
 │   ├── capabilities/
 │   │   └── main.json               # 只授权给 "main" 窗口
 │   └── src/
-│       ├── main.rs
+│       ├── main.rs                 # 正常应用入口
+│       ├── e2e_main.rs             # 仅 e2e feature 可构建的独立测试入口
 │       ├── lib.rs                  # 注册 command、创建 preview 窗口
 │       ├── state.rs                # AppState：按用途分锁，不用一把大锁
 │       ├── model.rs                # PostDocument / PreviewStatus / PublishResult
@@ -132,13 +133,18 @@ my-blog-editor/
 │   │   ├── livePreview.ts          # 唯一的 ViewPlugin：可见区遍历与 DecorationSet
 │   │   ├── livePreviewStructural.ts # 引用、列表、任务项、表格节点规则
 │   │   ├── livePreviewWidgets.ts    # 代码语言、列表、任务框、图片 Widget
-│   │   └── livePreview.test.ts     # 选区、IME、可见区、源码/撤销不变量
+│   │   ├── livePreview.test.ts     # 选区、IME、可见区、源码/撤销不变量
+│   │   └── livePreview.performance.test.ts # 1 MiB 长文档的可见区帧预算
 │   └── components/
 │       ├── Sidebar.tsx
 │       ├── FrontmatterForm.tsx
 │       ├── TagEditor.tsx
 │       ├── PreviewController.tsx   # 请求启动/获取 URL/创建预览窗口，不直接承载网页
 │       └── GitPanel.tsx            # 提交 / 提交并推送 两个按钮
+│
+├── test/e2e/
+│   ├── wdio.conf.mjs               # 临时项目 + 嵌入式 Tauri WebDriver
+│   └── specs/editor-smoke.e2e.mjs  # 真实 WebKitGTK 打开/编辑/保存闭环
 │
 ├── package.json
 └── vite.config.ts
@@ -256,7 +262,7 @@ HTTP 轮询和预览子进程退出不跨越状态锁；Git 发布为了给 stag
 
 核心是一个 `ViewPlugin`，文档/光标/可见区域或 Lezer 后台语法树变化时，只遍历 `visibleRanges` 内的 `syntaxTree`；所有视觉装饰写进同一个 `DecorationSet`。被隐藏的语法标记另生成一个只供 `atomicRanges` 使用的集合，避免方向键落进视觉上的零宽区域。异步图片使用最多 64 项的 LRU Blob URL 缓存；淘汰和插件销毁都会 revoke。
 
-编辑器用 CodeMirror `Compartment` 在“实时排版”和“源码显示”之间热切换，不重建 `EditorState`，因此正文、选区和 undo 历史都保留。当前已完成 heading、strong、emphasis、inlineCode、link、fencedCode、单行 image、blockquote、bullet/ordered list、task list 与 GFM table；图片字节异步加载后通过 Blob URL 缓存，插件销毁时统一 revoke，加载完成会通知 CodeMirror 重新测量布局。任务复选框是显式编辑动作，只替换 `TaskMarker` 中间的一个字符，因此正常进入 dirty 与 undo 历史。
+编辑器用 CodeMirror `Compartment` 在“实时排版”和“源码显示”之间热切换，不重建 `EditorState`，因此正文、选区和 undo 历史都保留。当前已完成 ATX/Setext heading、strong、emphasis、strikethrough、inlineCode、普通链接与自动链接、fencedCode、单行 image、horizontal rule、blockquote、bullet/ordered list、task list 与 GFM table；图片字节异步加载后通过 Blob URL 缓存，插件销毁时统一 revoke，加载完成会通知 CodeMirror 重新测量布局。任务复选框是显式编辑动作，只替换 `TaskMarker` 中间的一个字符，因此正常进入 dirty 与 undo 历史。
 
 需要作为验收标准的不变量：
 
@@ -269,6 +275,13 @@ HTTP 轮询和预览子进程退出不跨越状态锁；Git 发布为了给 stag
 7. 保存结果与关闭实时预览后看到的内容完全一致
 
 第一版只支持 `.md`，不做 `.mdx`（JSX 节点、组件属性会显著增加复杂度）。
+
+### 6.1 WebKitGTK 验收与长文档预算
+
+- `pnpm test:e2e` 以 `e2e,custom-protocol` feature 构建独立的 `blog-editor-e2e` 测试二进制，通过 `@wdio/tauri-service` 的嵌入式 WebDriver 在 Xvfb 中驱动真实 WebKitGTK；用例覆盖自动打开隔离项目、文章打开、实时/源码模式切换、真实键盘输入、删除线装饰、dirty 状态、保存以及最终磁盘内容。
+- `tauri-plugin-wdio-webdriver` 是 optional dependency，只在 `e2e` feature 下注册。正常开发与发布构建不包含测试 HTTP 自动化端点。
+- E2E launcher 每次只把 `.blog-editor.json` 和受控的 `hello-astro.md` 复制到新建临时目录，Rust 侧自动打开项目的环境变量入口同样只在 `e2e` feature 存在；测试结束删除临时目录，不读写手测文章和真实博客。
+- `livePreview.performance.test.ts` 预先完整解析约 1 MiB Markdown，再对约 4 KiB 可见区重复构建装饰；p95 必须低于 16 ms。完整语法树注入只服务可复现基准，生产插件仍直接使用 CodeMirror 的增量语法树。
 
 ---
 
@@ -325,11 +338,11 @@ PreviewManager、独立无权限的 preview 窗口、绑定 127.0.0.1、就绪�
 
 **阶段 4：图片、标签、设置**
 图片粘贴/拖拽、文件名冲突处理、标签索引与自动补全、项目配置 UI、删除文章及资产确认。
-当前检查点：图片粘贴/拖拽（含 WebKitGTK 原生兜底）、待提交清理、标签索引、重命名资产改写、可恢复删除、项目配置 UI、保存屏障、关闭/草稿恢复，以及实时排版核心节点和结构化块（引用、列表、任务项、表格）均已完成；下一批可补齐删除线、自动链接、分隔线与 Setext 标题。
+当前检查点：图片粘贴/拖拽（含 WebKitGTK 原生兜底）、待提交清理、标签索引、重命名资产改写、可恢复删除、项目配置 UI、保存屏障、关闭/草稿恢复，以及实时排版核心节点和结构化块（引用、列表、任务项、表格、删除线、自动链接、分隔线、Setext 标题）均已完成。实时排版第一版的语法范围至此闭环；真实 WebKitGTK 打开/输入/模式切换/保存 smoke 与 1 MiB 长文档可见区性能预算也已落地，不继续无边界扩展语法。
 
-Linux CI 固定 Node 22、pnpm 11 与 Rust 1.88，执行前端测试/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试和 `tauri build --no-bundle`。
+Linux CI 固定 Node 22、pnpm 11 与 Rust 1.88，执行前端测试（含性能预算）/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试、默认 feature 的 `tauri build --no-bundle`，并在 Xvfb 中执行测试 feature 的真实 WebKitGTK E2E。
 
 **阶段 5：Obsidian 式实时预览**
-heading → strong → emphasis → inlineCode → link → fencedCode → image → blockquote/list/task/table，IME/选区/复制/撤销测试作为验收的一部分，不是事后补充。
+ATX/Setext heading → strong → emphasis → strikethrough → inlineCode → link/autolink → fencedCode → image → horizontal rule → blockquote/list/task/table，IME/选区/复制/撤销测试作为验收的一部分，不是事后补充。
 
 即使实时预览最后没按期完成，前四个阶段已经是一个完整可用的工具。

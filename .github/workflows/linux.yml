@@ -32,7 +32,9 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            xvfb \
+            xauth
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -65,7 +67,14 @@ jobs:
 
       - name: Test Rust
         working-directory: src-tauri
-        run: cargo +1.88.0 test
+        run: cargo +1.88.0 test --all-features
 
       - name: Build Linux desktop binary
+        env:
+          RUSTUP_TOOLCHAIN: 1.88.0
         run: pnpm tauri build --no-bundle
+
+      - name: Test WebKitGTK desktop smoke
+        env:
+          RUSTUP_TOOLCHAIN: 1.88.0
+        run: pnpm test:e2e

@@ -9,12 +9,33 @@ use tauri::Manager;
 
 use state::AppState;
 
+#[cfg(not(feature = "e2e"))]
+fn initial_app_state() -> AppState {
+    AppState::default()
+}
+
+#[cfg(feature = "e2e")]
+fn initial_app_state() -> AppState {
+    let mut state = AppState::default();
+    if let Some(root) = std::env::var_os("BLOG_EDITOR_E2E_PROJECT") {
+        let project = services::project::open_project(std::path::Path::new(&root))
+            .expect("BLOG_EDITOR_E2E_PROJECT must point to a valid test project");
+        *state.project.get_mut().expect("project lock poisoned") = Some(project);
+        *state.project_generation.get_mut() = 1;
+    }
+    state
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .manage(AppState::default())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(feature = "e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
+        .manage(initial_app_state())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
