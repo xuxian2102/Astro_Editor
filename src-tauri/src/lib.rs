@@ -90,3 +90,21 @@ pub fn run() {
             }
         });
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn trusted_main_window_can_finish_the_close_request_handshake() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main.json"))
+                .expect("main capability must be valid JSON");
+        let permissions = capability["permissions"]
+            .as_array()
+            .expect("main capability permissions must be an array");
+
+        assert!(permissions
+            .iter()
+            .any(|permission| { permission.as_str() == Some("core:window:allow-destroy") }));
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    }
+}

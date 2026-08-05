@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-destroy",
     "allow-select-project",
     "allow-get-project",
     "allow-update-project-config",
