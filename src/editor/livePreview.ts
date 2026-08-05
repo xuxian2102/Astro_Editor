@@ -50,6 +50,8 @@ export interface LivePreviewBuildOptions {
   state: EditorState;
   visibleRanges: readonly VisibleRange[];
   composing: boolean;
+  /** compositionstart 时的文档位置；选区被 WebKit 临时挪动时仍只保护原编辑节点。 */
+  compositionAnchor?: number | null;
   resolveImage?: (markdownPath: string) => LivePreviewImageState;
   /** 性能基准可注入 ensureSyntaxTree 返回的完整树；正常编辑器始终省略。 */
   tree?: ReturnType<typeof syntaxTree>;
@@ -171,6 +173,22 @@ export function selectionIntersectsNode(
   );
 }
 
+function editingIntersectsNode(
+  options: LivePreviewBuildOptions,
+  from: number,
+  to: number,
+): boolean {
+  if (selectionIntersectsNode(options.state, from, to)) return true;
+  const anchor = options.compositionAnchor;
+  return (
+    options.composing &&
+    anchor !== null &&
+    anchor !== undefined &&
+    anchor >= from &&
+    anchor <= to
+  );
+}
+
 function directChildRanges(node: SyntaxNode, name: string): VisibleRange[] {
   const ranges: VisibleRange[] = [];
   for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -277,10 +295,7 @@ function addDelimitedNode(
     visualRanges.push(contentDecoration.range(contentFrom, contentTo));
   }
 
-  if (
-    !options.composing &&
-    !selectionIntersectsNode(options.state, node.from, node.to)
-  ) {
+  if (!editingIntersectsNode(options, node.from, node.to)) {
     addHiddenMarkers(
       owner,
       markers,
@@ -316,10 +331,7 @@ function addLinkNode(
     );
   }
 
-  if (
-    options.composing ||
-    selectionIntersectsNode(options.state, node.from, node.to)
-  ) {
+  if (editingIntersectsNode(options, node.from, node.to)) {
     return;
   }
   addHiddenRange(
@@ -365,10 +377,7 @@ function addAutolinkNode(
     linkContentDecoration("autolink", target).range(url.from, url.to),
   );
 
-  if (
-    options.composing ||
-    selectionIntersectsNode(options.state, node.from, node.to)
-  ) {
+  if (editingIntersectsNode(options, node.from, node.to)) {
     return;
   }
   addHiddenMarkers(
@@ -419,10 +428,7 @@ function addSetextHeadingNode(
     );
   }
 
-  if (
-    options.composing ||
-    selectionIntersectsNode(options.state, node.from, node.to)
-  ) {
+  if (editingIntersectsNode(options, node.from, node.to)) {
     return;
   }
 
@@ -445,10 +451,7 @@ function addHorizontalRuleNode(
   atomicRanges: Range<Decoration>[],
 ) {
   const line = options.state.doc.lineAt(node.from);
-  if (
-    options.composing ||
-    selectionIntersectsNode(options.state, line.from, line.to)
-  ) {
+  if (editingIntersectsNode(options, line.from, line.to)) {
     return;
   }
   const range = Decoration.replace({
@@ -490,10 +493,7 @@ function addFencedCodeNode(
     visualRanges.push(decoration.range(line.from));
   }
 
-  if (
-    options.composing ||
-    selectionIntersectsNode(options.state, node.from, node.to)
-  ) {
+  if (editingIntersectsNode(options, node.from, node.to)) {
     return;
   }
 
@@ -568,8 +568,7 @@ function addImageNode(
   atomicRanges: Range<Decoration>[],
 ): boolean {
   if (
-    options.composing ||
-    selectionIntersectsNode(options.state, node.from, node.to) ||
+    editingIntersectsNode(options, node.from, node.to) ||
     options.state.doc.lineAt(node.from).number !==
       options.state.doc.lineAt(node.to).number
   ) {
@@ -660,10 +659,7 @@ export function buildLivePreviewDecorations(
           const lineFrom = options.state.doc.lineAt(node.from).from;
           visualRanges.push(headingLines[level - 1].range(lineFrom));
 
-          if (
-            !options.composing &&
-            !selectionIntersectsNode(options.state, node.from, node.to)
-          ) {
+          if (!editingIntersectsNode(options, node.from, node.to)) {
             addHiddenMarkers(
               "heading",
               headingMarkerRanges(options.state, node),
@@ -820,6 +816,7 @@ class LivePreviewPluginValue {
   decorations: DecorationSet = Decoration.none;
   atomicRanges: DecorationSet = Decoration.none;
   private composing: boolean;
+  private compositionAnchor: number | null;
   private destroyed = false;
   private syntaxTree: ReturnType<typeof syntaxTree>;
   private readonly imageCache = new Map<string, LivePreviewImageState>();
@@ -830,6 +827,9 @@ class LivePreviewPluginValue {
     private readonly config: LivePreviewConfig,
   ) {
     this.composing = view.compositionStarted;
+    this.compositionAnchor = this.composing
+      ? view.state.selection.main.head
+      : null;
     this.syntaxTree = syntaxTree(view.state);
     this.rebuild(view);
   }
@@ -838,10 +838,23 @@ class LivePreviewPluginValue {
     let compositionChanged = false;
     let imageChanged = false;
     for (const transaction of update.transactions) {
+      if (this.compositionAnchor !== null && transaction.docChanged) {
+        this.compositionAnchor = transaction.changes.mapPos(
+          this.compositionAnchor,
+          1,
+        );
+      }
       for (const effect of transaction.effects) {
-        if (effect.is(setCompositionActive) && effect.value !== this.composing) {
-          this.composing = effect.value;
-          compositionChanged = true;
+        if (effect.is(setCompositionActive)) {
+          if (effect.value) {
+            this.compositionAnchor = transaction.state.selection.main.head;
+          } else {
+            this.compositionAnchor = null;
+          }
+          if (effect.value !== this.composing) {
+            this.composing = effect.value;
+            compositionChanged = true;
+          }
         }
         if (effect.is(imagePreviewChanged)) imageChanged = true;
       }
@@ -869,6 +882,7 @@ class LivePreviewPluginValue {
       state: view.state,
       visibleRanges: view.visibleRanges,
       composing: this.composing,
+      compositionAnchor: this.compositionAnchor,
       resolveImage: (markdownPath) => this.resolveImage(markdownPath, view),
     });
     this.decorations = result.decorations;

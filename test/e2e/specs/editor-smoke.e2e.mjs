@@ -245,5 +245,32 @@ describe("WebKitGTK editor smoke", () => {
         ),
       { timeoutMsg: "保存后的 Markdown 没有引用 Wayland 剪贴板图片" },
     );
+
+    const compositionStarted = await browser.execute(() => {
+      const editor = document.querySelector(".cm-content");
+      if (!(editor instanceof HTMLElement)) return false;
+      editor.focus();
+      editor.dispatchEvent(
+        new CompositionEvent("compositionstart", {
+          bubbles: true,
+          data: "中",
+        }),
+      );
+      return true;
+    });
+    assert.equal(compositionStarted, true, "无法触发 WebKitGTK compositionstart");
+    await waitForDom(
+      "在其他文本位置开始中文输入时，已渲染图片错误地退回 Markdown 源码",
+      () => document.querySelector(".cm-live-image-ready img") !== null,
+    );
+    await browser.execute(() => {
+      const editor = document.querySelector(".cm-content");
+      editor?.dispatchEvent(
+        new CompositionEvent("compositionend", {
+          bubbles: true,
+          data: "中",
+        }),
+      );
+    });
   });
 });

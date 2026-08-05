@@ -12,4 +12,8 @@ export default defineConfig({
   build: {
     target: "es2022",
   },
+  test: {
+    // makepkg 的忽略构建目录可能包含一份源码副本，不能重复收集其中的测试。
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+  },
 });

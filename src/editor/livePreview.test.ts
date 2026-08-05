@@ -78,10 +78,12 @@ function build(
   composing = false,
   visibleRanges = [{ from: 0, to: state.doc.length }],
   resolveImage?: (markdownPath: string) => LivePreviewImageState,
+  compositionAnchor: number | null = null,
 ) {
   return buildLivePreviewDecorations({
     state,
     composing,
+    compositionAnchor,
     visibleRanges,
     resolveImage,
   });
@@ -149,15 +151,41 @@ describe("live preview decorations", () => {
     );
   });
 
-  it("never replaces syntax markers while IME composition is active", () => {
+  it("keeps nodes outside the IME composition anchor rendered", () => {
     const doc = "**粗体**、*斜体*、`代码`，光标";
     const state = createState(doc, doc.length);
     const result = build(state, true);
     const visual = snapshots(result.decorations, state);
 
-    expect(visual.filter((item) => item.kind === "syntax")).toEqual([]);
-    expect(snapshots(result.atomicRanges, state)).toEqual([]);
+    expect(visual.filter((item) => item.kind === "syntax")).toHaveLength(6);
+    expect(snapshots(result.atomicRanges, state)).toHaveLength(6);
     expect(visual.filter((item) => item.kind === "content")).toHaveLength(3);
+  });
+
+  it("reveals only the node captured when IME composition started", () => {
+    const doc = "**粗体**、*斜体*，选区后来移动到这里";
+    const state = createState(doc, doc.length);
+    const visual = snapshots(
+      build(
+        state,
+        true,
+        [{ from: 0, to: state.doc.length }],
+        undefined,
+        doc.indexOf("粗体") + 1,
+      ).decorations,
+      state,
+    );
+
+    expect(
+      visual.some(
+        (item) => item.kind === "syntax" && item.owner === "strong",
+      ),
+    ).toBe(false);
+    expect(
+      visual.filter(
+        (item) => item.kind === "syntax" && item.owner === "emphasis",
+      ),
+    ).toHaveLength(2);
   });
 
   it("only decorates syntax nodes intersecting visible ranges", () => {
@@ -414,10 +442,10 @@ describe("live preview decorations", () => {
         .map((item) => item.text),
     ).toEqual(["  * * *  "]);
     expect(
-      snapshots(build(state, true).decorations, state).some(
+      snapshots(build(state, true).decorations, state).filter(
         (item) => item.kind === "horizontal-rule",
       ),
-    ).toBe(false);
+    ).toHaveLength(2);
     expect(state.doc.toString()).toBe(doc);
   });
 
@@ -509,7 +537,7 @@ describe("live preview decorations", () => {
     ).toBe(false);
   });
 
-  it("does not replace links, fences, or images during IME composition", () => {
+  it("keeps unrelated links, fences, and images rendered during IME composition", () => {
     const doc =
       "[链接](https://example.com) ![图](post/a.png)\n\n```ts\nx\n```\n\n尾";
     const state = createState(doc, doc.length);
@@ -523,9 +551,29 @@ describe("live preview decorations", () => {
       state,
     );
 
-    expect(visual.some((item) => item.kind === "syntax")).toBe(false);
-    expect(visual.some((item) => item.kind === "image")).toBe(false);
-    expect(visual.some((item) => item.kind === "code-language")).toBe(false);
+    expect(visual.some((item) => item.kind === "syntax")).toBe(true);
+    expect(visual.some((item) => item.kind === "image")).toBe(true);
+    expect(visual.some((item) => item.kind === "code-language")).toBe(true);
+  });
+
+  it("reveals an image only when IME composition started inside its source", () => {
+    const doc =
+      "![图](post/a.png)\n\n![保留](post/b.png)\n\n输入位置";
+    const state = createState(doc, doc.length);
+    const visual = snapshots(
+      build(
+        state,
+        true,
+        [{ from: 0, to: state.doc.length }],
+        () => ({ status: "ready", src: "blob:test" }),
+        doc.indexOf("post/a.png"),
+      ).decorations,
+      state,
+    );
+    const images = visual.filter((item) => item.kind === "image");
+
+    expect(images).toHaveLength(1);
+    expect(images[0].target).toBe("post/b.png");
   });
 
   it("styles blockquotes and hides every quote marker as one atomic prefix", () => {
@@ -647,15 +695,15 @@ describe("live preview decorations", () => {
     ).toBe(false);
   });
 
-  it("keeps structural replacement widgets disabled during IME composition", () => {
+  it("keeps unrelated structural widgets rendered during IME composition", () => {
     const doc =
       "> 引用\n\n- 普通\n- [ ] 任务\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n光标";
     const state = createState(doc, doc.length);
     const visual = snapshots(build(state, true).decorations, state);
 
-    expect(visual.some((item) => item.kind === "syntax")).toBe(false);
-    expect(visual.some((item) => item.kind === "list-marker")).toBe(false);
-    expect(visual.some((item) => item.kind === "task-checkbox")).toBe(false);
+    expect(visual.some((item) => item.kind === "syntax")).toBe(true);
+    expect(visual.some((item) => item.kind === "list-marker")).toBe(true);
+    expect(visual.some((item) => item.kind === "task-checkbox")).toBe(true);
   });
 });
 

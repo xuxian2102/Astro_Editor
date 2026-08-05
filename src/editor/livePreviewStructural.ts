@@ -12,6 +12,7 @@ type StructuralOwner = "blockquote" | "list" | "task" | "table";
 export interface StructuralPreviewOptions {
   state: EditorState;
   composing: boolean;
+  compositionAnchor?: number | null;
 }
 
 const hiddenSyntaxByOwner: Record<StructuralOwner, Decoration> = {
@@ -97,6 +98,22 @@ function selectionIntersectsNode(
   );
 }
 
+function editingIntersectsNode(
+  options: StructuralPreviewOptions,
+  from: number,
+  to: number,
+): boolean {
+  if (selectionIntersectsNode(options.state, from, to)) return true;
+  const anchor = options.compositionAnchor;
+  return (
+    options.composing &&
+    anchor !== null &&
+    anchor !== undefined &&
+    anchor >= from &&
+    anchor <= to
+  );
+}
+
 function directChild(node: SyntaxNode, name: string): SyntaxNode | null {
   for (let child = node.firstChild; child; child = child.nextSibling) {
     if (child.name === name) return child;
@@ -170,8 +187,7 @@ function addQuoteMarkNode(
   const blockquote = ancestorNamed(node, "Blockquote");
   if (
     !blockquote ||
-    options.composing ||
-    selectionIntersectsNode(options.state, blockquote.from, blockquote.to)
+    editingIntersectsNode(options, blockquote.from, blockquote.to)
   ) {
     return;
   }
@@ -204,8 +220,7 @@ function addListItemNode(
   const marker = directChild(node, "ListMark");
   if (
     !marker ||
-    options.composing ||
-    selectionIntersectsNode(options.state, node.from, node.to)
+    editingIntersectsNode(options, node.from, node.to)
   ) {
     return;
   }
@@ -271,10 +286,7 @@ function addTaskNode(
     );
   }
 
-  if (
-    options.composing ||
-    selectionIntersectsNode(options.state, listItem.from, listItem.to)
-  ) {
+  if (editingIntersectsNode(options, listItem.from, listItem.to)) {
     return;
   }
   const range = Decoration.replace({
@@ -309,10 +321,7 @@ function addTableDelimiterNode(
   if (node.parent?.name === "Table") {
     addTableLineNode(node, tableSeparatorLine, options, visualRanges);
   }
-  if (
-    options.composing ||
-    selectionIntersectsNode(options.state, table.from, table.to)
-  ) {
+  if (editingIntersectsNode(options, table.from, table.to)) {
     return;
   }
   addHiddenRange(
