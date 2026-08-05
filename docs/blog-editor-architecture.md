@@ -171,11 +171,17 @@ struct PostDocument {
     revision: String,               // 内容哈希，用于检测外部修改
 }
 
+struct ErrorPayload {
+    code: String,                   // 稳定机器码
+    params: Map<String, Value>,     // 前端翻译插值参数
+    fallback: String,               // 未知 code / 版本错配时的可读诊断
+}
+
 enum PreviewStatus {
     Stopped,
     Starting,
     Ready { url: String, pid: u32 },
-    Failed { message: String },
+    Failed { error: ErrorPayload, log_tail: String },
 }
 
 struct PublishResult {
@@ -183,10 +189,14 @@ struct PublishResult {
     committed: bool,
     commit_hash: Option<String>,
     pushed: bool,
-    error_stage: Option<String>,    // "status" | "stage" | "commit" | "push"
-    message: Option<String>,
+    error_stage: Option<String>,    // "stage" | "commit" | "push"
+    error: Option<ErrorPayload>,
 }
 ```
+
+Tauri 命令的 `AppError` 也序列化为同一个 `ErrorPayload`。前端优先按 `code` 从
+`src/i18n/zh-CN.ts` 选择文案并代入 `params`；不认识的错误码直接显示 `fallback`。
+因此命令拒绝、Git 部分成功和异步预览失败不会再形成三套互不兼容的字符串协议。
 
 ```rust
 // state.rs —— 按用途分锁，避免一把大锁堵住所有命令

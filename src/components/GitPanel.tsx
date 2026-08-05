@@ -1,5 +1,11 @@
 import { useState } from "react";
-import type { FileChange, GitStatus, PublishResult } from "../lib/tauriApi";
+import { useTranslation } from "react-i18next";
+import {
+  errorMessage,
+  type FileChange,
+  type GitStatus,
+  type PublishResult,
+} from "../lib/tauriApi";
 import { canPublish, changeLabel, groupChanges } from "../domain/gitStatus";
 
 interface GitPanelProps {
@@ -20,14 +26,15 @@ export default function GitPanel({
   onPublish,
   onRefresh,
 }: GitPanelProps) {
+  const { t } = useTranslation();
   const [message, setMessage] = useState("");
 
   if (statusError) {
     return (
       <section className="git-panel">
         <div className="git-panel-header">
-          <h2>Git</h2>
-          <button type="button" onClick={onRefresh} title="刷新">
+          <h2>{t(($) => $.git.title)}</h2>
+          <button type="button" onClick={onRefresh} title={t(($) => $.common.refresh)}>
             ↻
           </button>
         </div>
@@ -40,9 +47,9 @@ export default function GitPanel({
     return (
       <section className="git-panel">
         <div className="git-panel-header">
-          <h2>Git</h2>
+          <h2>{t(($) => $.git.title)}</h2>
         </div>
-        <p className="git-hint">加载中…</p>
+        <p className="git-hint">{t(($) => $.git.loading)}</p>
       </section>
     );
   }
@@ -58,14 +65,14 @@ export default function GitPanel({
   return (
     <section className="git-panel">
       <div className="git-panel-header">
-        <h2>Git</h2>
-        <button type="button" onClick={onRefresh} title="刷新">
+        <h2>{t(($) => $.git.title)}</h2>
+        <button type="button" onClick={onRefresh} title={t(($) => $.common.refresh)}>
           ↻
         </button>
       </div>
 
       <div className="git-branch-line">
-        <span>{status.branch ?? "(游离 HEAD)"}</span>
+        <span>{status.branch ?? t(($) => $.git.detachedHead)}</span>
         {status.upstream && (
           <span className="git-ahead-behind">
             {status.ahead > 0 && `↑${status.ahead}`}
@@ -74,12 +81,12 @@ export default function GitPanel({
         )}
       </div>
 
-      <ChangeGroup title="编辑器管理（会被提交）" changes={managed} />
-      <ChangeGroup title="仓库里其他改动（不会被提交）" changes={other} muted />
+      <ChangeGroup title={t(($) => $.git.managedChanges)} changes={managed} />
+      <ChangeGroup title={t(($) => $.git.otherChanges)} changes={other} muted />
 
       <textarea
         className="git-message"
-        placeholder="提交信息"
+        placeholder={t(($) => $.git.commitMessage)}
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         rows={2}
@@ -87,7 +94,7 @@ export default function GitPanel({
 
       <div className="git-actions">
         <button type="button" disabled={!ready} onClick={() => submit(false)}>
-          提交
+          {t(($) => $.git.commit)}
         </button>
         <button
           type="button"
@@ -95,7 +102,7 @@ export default function GitPanel({
           disabled={!ready}
           onClick={() => submit(true)}
         >
-          {publishing ? "发布中…" : "提交并推送"}
+          {publishing ? t(($) => $.git.publishing) : t(($) => $.git.commitAndPush)}
         </button>
       </div>
 
@@ -132,18 +139,23 @@ function ChangeGroup({
 }
 
 function PublishResultCard({ result }: { result: PublishResult }) {
+  const { t } = useTranslation();
   const ok = result.errorStage === null;
   return (
     <div className={ok ? "publish-result publish-ok" : "publish-result publish-partial"}>
       <div className="publish-steps">
-        <Step label="暂存" done={result.staged} failed={result.errorStage === "stage"} />
-        <Step label="提交" done={result.committed} failed={result.errorStage === "commit"} />
-        <Step label="推送" done={result.pushed} failed={result.errorStage === "push"} skipped={!result.committed} />
+        <Step label={t(($) => $.git.stage)} done={result.staged} failed={result.errorStage === "stage"} />
+        <Step label={t(($) => $.git.commit)} done={result.committed} failed={result.errorStage === "commit"} />
+        <Step label={t(($) => $.git.push)} done={result.pushed} failed={result.errorStage === "push"} skipped={!result.committed} />
       </div>
       {result.commitHash && (
-        <p className="publish-hash">已提交 {result.commitHash.slice(0, 7)}</p>
+        <p className="publish-hash">
+          {t(($) => $.git.committed, { hash: result.commitHash.slice(0, 7) })}
+        </p>
       )}
-      {result.message && <p className="publish-message">{result.message}</p>}
+      {result.error && (
+        <p className="publish-message">{errorMessage(result.error)}</p>
+      )}
     </div>
   );
 }

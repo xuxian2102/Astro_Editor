@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::AppError;
+use crate::error::{AppError, ErrorPayload};
 use crate::model::{PreviewStatus, ProjectContext};
 use crate::services::posts;
 use crate::state::AppState;
@@ -241,13 +241,7 @@ async fn run_startup(
 
     let mut child = match build_command(exe, cwd, args).spawn() {
         Ok(child) => child,
-        Err(e) => {
-            return (
-                StartupOutcome::SpawnFailed(format!("无法启动预览：{e}")),
-                None,
-                log_tail,
-            )
-        }
+        Err(e) => return (StartupOutcome::SpawnFailed(e.to_string()), None, log_tail),
     };
 
     if let Some(stdout) = child.stdout.take() {
@@ -501,7 +495,7 @@ async fn run_preview_lifecycle(
                 generation,
                 PreviewStatus::Failed {
                     generation,
-                    message: e.to_string(),
+                    error: e.payload(),
                     log_tail: String::new(),
                 },
             )
@@ -511,15 +505,17 @@ async fn run_preview_lifecycle(
     };
 
     if !port_is_available(&ctx.config.preview.host, ctx.config.preview.port).await {
+        let port = ctx.config.preview.port;
         finish(
             &app,
             generation,
             PreviewStatus::Failed {
                 generation,
-                message: format!(
-                    "预览端口 {} 已被占用，请停止占用进程或在项目设置中更换端口",
-                    ctx.config.preview.port
-                ),
+                error: ErrorPayload::new(
+                    "preview_port_in_use",
+                    format!("预览端口 {port} 已被占用，请停止占用进程或在项目设置中更换端口"),
+                )
+                .with_param("port", port),
                 log_tail: String::new(),
             },
         )
@@ -546,13 +542,17 @@ async fn run_preview_lifecycle(
     .await;
 
     match outcome {
-        StartupOutcome::SpawnFailed(message) => {
+        StartupOutcome::SpawnFailed(detail) => {
             finish(
                 &app,
                 generation,
                 PreviewStatus::Failed {
                     generation,
-                    message,
+                    error: ErrorPayload::new(
+                        "preview_spawn_failed",
+                        format!("无法启动预览：{detail}"),
+                    )
+                    .with_param("detail", detail),
                     log_tail: String::new(),
                 },
             )
@@ -565,13 +565,18 @@ async fn run_preview_lifecycle(
             finish(&app, generation, PreviewStatus::Stopped).await;
         }
         StartupOutcome::ExitedEarly(exit) => {
+            let exit = format!("{exit:?}");
             let tail = log_tail.lock().await.clone();
             finish(
                 &app,
                 generation,
                 PreviewStatus::Failed {
                     generation,
-                    message: format!("预览进程提前退出（{exit:?}）"),
+                    error: ErrorPayload::new(
+                        "preview_exited_early",
+                        format!("预览进程提前退出（{exit}）"),
+                    )
+                    .with_param("exit", exit),
                     log_tail: tail,
                 },
             )
@@ -582,12 +587,17 @@ async fn run_preview_lifecycle(
                 terminate_process_group(&mut child).await;
             }
             let tail = log_tail.lock().await.clone();
+            let seconds = STARTUP_TIMEOUT.as_secs();
             finish(
                 &app,
                 generation,
                 PreviewStatus::Failed {
                     generation,
-                    message: "启动超时（20 秒内未就绪）".into(),
+                    error: ErrorPayload::new(
+                        "preview_startup_timeout",
+                        format!("启动超时（{seconds} 秒内未就绪）"),
+                    )
+                    .with_param("seconds", seconds),
                     log_tail: tail,
                 },
             )
@@ -625,14 +635,18 @@ async fn run_preview_lifecycle(
                     }
                 }
                 SteadyOutcome::ExitedUnexpectedly(exit) => {
-                    let message = format!("预览进程意外退出（{exit:?}）");
+                    let exit = format!("{exit:?}");
                     let tail = log_tail.lock().await.clone();
                     if finish(
                         &app,
                         generation,
                         PreviewStatus::Failed {
                             generation,
-                            message,
+                            error: ErrorPayload::new(
+                                "preview_exited_unexpectedly",
+                                format!("预览进程意外退出（{exit}）"),
+                            )
+                            .with_param("exit", exit),
                             log_tail: tail,
                         },
                     )

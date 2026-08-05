@@ -7,6 +7,7 @@ import {
 } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { api, errorMessage } from "../lib/tauriApi";
+import i18n from "../i18n";
 
 export interface ImageInsertionRange {
   from: number;
@@ -21,17 +22,25 @@ export function imageImportLimitError(
   files: ReadonlyArray<Pick<File, "name" | "size">>,
 ): string | null {
   if (files.length > MAX_IMAGE_BATCH_COUNT) {
-    return `一次最多导入 ${MAX_IMAGE_BATCH_COUNT} 张图片`;
+    return i18n.t(($) => $.editor.imageImport.maxCount, {
+      count: MAX_IMAGE_BATCH_COUNT,
+    });
   }
   let total = 0;
   for (const file of files) {
-    if (file.size <= 0) return `图片文件为空：${file.name}`;
+    if (file.size <= 0) {
+      return i18n.t(($) => $.editor.imageImport.emptyFile, {
+        name: file.name,
+      });
+    }
     if (file.size > MAX_IMAGE_FILE_BYTES) {
-      return `单张图片不能超过 25 MiB：${file.name}`;
+      return i18n.t(($) => $.editor.imageImport.fileTooLarge, {
+        name: file.name,
+      });
     }
     total += file.size;
     if (total > MAX_IMAGE_BATCH_BYTES) {
-      return "一次导入的图片总大小不能超过 100 MiB";
+      return i18n.t(($) => $.editor.imageImport.batchTooLarge);
     }
   }
   return null;
@@ -336,18 +345,22 @@ export async function insertImagesSequentially(
     for (const file of files) {
       if (!isActive()) break;
       if (!imageInsertionRange(view, anchorId)) {
-        onError("图片导入位置已被编辑，本次插入已取消");
+        onError(i18n.t(($) => $.editor.imageImport.anchorChanged));
         break;
       }
       try {
         const buffer = await file.arrayBuffer();
         if (!isActive()) break;
         if (!imageInsertionRange(view, anchorId)) {
-          onError("图片导入位置已被编辑，本次插入已取消");
+          onError(i18n.t(($) => $.editor.imageImport.anchorChanged));
           break;
         }
         if (buffer.byteLength > MAX_IMAGE_FILE_BYTES) {
-          onError(`单张图片不能超过 25 MiB：${file.name}`);
+          onError(
+            i18n.t(($) => $.editor.imageImport.fileTooLarge, {
+              name: file.name,
+            }),
+          );
           break;
         }
         const bytes = new Uint8Array(buffer);
@@ -361,7 +374,7 @@ export async function insertImagesSequentially(
           isActive,
         );
         if (!inserted) {
-          onError("图片已读取，但插入位置在等待期间被修改；未改动正文");
+          onError(i18n.t(($) => $.editor.imageImport.anchorChangedAfterRead));
           break;
         }
       } catch (e) {
@@ -433,7 +446,7 @@ export async function insertClipboardImagesAtAnchor(
       false,
     );
     if (!inserted && reportMissingImage && images.length > 0) {
-      onError("图片已读取，但插入位置在等待期间被修改；未改动正文");
+      onError(i18n.t(($) => $.editor.imageImport.anchorChangedAfterRead));
     }
     return inserted;
   } catch (e) {

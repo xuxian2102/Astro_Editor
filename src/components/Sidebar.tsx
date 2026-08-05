@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { PostSummary, ProjectInfo } from "../lib/tauriApi";
 
 interface SidebarProps {
@@ -22,6 +23,7 @@ export default function Sidebar({
   onRenamePost,
   onDeletePost,
 }: SidebarProps) {
+  const { t } = useTranslation();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export default function Sidebar({
     <aside className="sidebar">
       <div className="sidebar-header">
         <button type="button" onClick={onOpenProject}>
-          {projectName ? "切换项目" : "打开项目"}
+          {projectName ? t(($) => $.sidebar.switchProject) : t(($) => $.sidebar.openProject)}
         </button>
         {projectName && <span className="project-name" title={project?.root}>{projectName}</span>}
       </div>
@@ -46,7 +48,7 @@ export default function Sidebar({
                 autoFocus
                 className="inline-input"
                 value={newName}
-                placeholder="文件名，如 my-post.md"
+                placeholder={t(($) => $.sidebar.fileNamePlaceholder)}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newName.trim()) {
@@ -62,7 +64,7 @@ export default function Sidebar({
               />
             ) : (
               <button type="button" onClick={() => setCreating(true)}>
-                ＋ 新建文章
+                {t(($) => $.sidebar.newPost)}
               </button>
             )}
           </div>
@@ -105,8 +107,8 @@ export default function Sidebar({
                         <button
                           type="button"
                           className="post-rename"
-                          title="重命名"
-                          aria-label={`重命名 ${post.id}`}
+                          title={t(($) => $.sidebar.rename)}
+                          aria-label={t(($) => $.sidebar.renamePost, { id: post.id })}
                           onClick={() => {
                             setRenamingId(post.id);
                             setRenameValue(post.id);
@@ -117,8 +119,8 @@ export default function Sidebar({
                         <button
                           type="button"
                           className="post-delete"
-                          title="移到废纸篓"
-                          aria-label={`删除 ${post.id}`}
+                          title={t(($) => $.sidebar.moveToTrash)}
+                          aria-label={t(($) => $.sidebar.deletePost, { id: post.id })}
                           onClick={() => onDeletePost(post.id)}
                         >
                           🗑
@@ -129,7 +131,9 @@ export default function Sidebar({
                 )}
               </li>
             ))}
-            {posts.length === 0 && <li className="post-empty">没有文章</li>}
+            {posts.length === 0 && (
+              <li className="post-empty">{t(($) => $.sidebar.noPosts)}</li>
+            )}
           </ul>
         </>
       )}

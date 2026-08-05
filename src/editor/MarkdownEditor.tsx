@@ -31,6 +31,7 @@ import {
   needsNativeClipboardFallback,
 } from "./imagePaste";
 import { api } from "../lib/tauriApi";
+import i18n from "../i18n";
 import {
   createLivePreviewExtension,
   imageMimeType,
@@ -134,7 +135,7 @@ export default function MarkdownEditor({
         livePreviewCompartmentRef.current.of(
           livePreviewEnabledRef.current ? configuredLivePreview : [],
         ),
-        placeholder("开始写作…"),
+        placeholder(i18n.t(($) => $.editor.placeholder)),
         keymap.of([
           {
             key: "Mod-s",

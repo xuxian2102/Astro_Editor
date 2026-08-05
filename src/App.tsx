@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   api,
@@ -63,6 +64,7 @@ type SessionUpdate =
   | ((current: PostSession | null) => PostSession | null);
 
 export default function App() {
+  const { t } = useTranslation();
   const [project, setRenderedProject] = useState<ProjectInfo | null>(null);
   const projectRef = useRef<ProjectInfo | null>(null);
   projectRef.current = project;
@@ -171,10 +173,12 @@ export default function App() {
         );
       } catch (e) {
         if (isAppError(e) && e.code === "stale_project_session") return;
-        setError(`读取自动恢复草稿失败：${errorMessage(e)}`);
+        setError(
+          t(($) => $.app.errors.draftReadFailed, { error: errorMessage(e) }),
+        );
       }
     },
-    [enqueueDraftOperation, setSession],
+    [enqueueDraftOperation, setSession, t],
   );
 
   useEffect(() => {
@@ -200,8 +204,12 @@ export default function App() {
           current?.id === snapshot.id &&
           current.projectGeneration === snapshot.projectGeneration
         ) {
-          setError((existing) =>
-            existing ?? `自动草稿保存失败：${errorMessage(e)}`,
+          setError(
+            (existing) =>
+              existing ??
+              t(($) => $.app.errors.draftAutosaveFailed, {
+                error: errorMessage(e),
+              }),
           );
         }
       });
@@ -214,7 +222,7 @@ export default function App() {
         draftTimerRef.current = null;
       }
     };
-  }, [cancelScheduledDraft, enqueueDraftOperation, session]);
+  }, [cancelScheduledDraft, enqueueDraftOperation, session, t]);
 
   const registerImageOperation = useCallback((operation: Promise<unknown>) => {
     const operations = pendingImageOperationsRef.current;
@@ -825,7 +833,11 @@ export default function App() {
         ),
       );
     } catch (e) {
-      setError(`草稿内容无法恢复：${errorMessage(e)}`);
+      setError(
+        t(($) => $.app.errors.draftRestoreFailed, {
+          error: errorMessage(e),
+        }),
+      );
     }
   };
 
@@ -878,9 +890,16 @@ export default function App() {
       <main className="main-pane">
         <header className="toolbar">
           <span className="doc-title">
-            {session ? session.id : project ? "选择一篇文章" : "先打开一个博客项目"}
+            {session
+              ? session.id
+              : project
+                ? t(($) => $.app.toolbar.selectPost)
+                : t(($) => $.app.toolbar.openProjectFirst)}
             {hasUnsavedWork && (
-              <span className="dirty-dot" title="有未保存改动或图片正在导入" />
+              <span
+                className="dirty-dot"
+                title={t(($) => $.app.toolbar.unsavedTitle)}
+              />
             )}
           </span>
           <div className="toolbar-actions">
@@ -892,7 +911,7 @@ export default function App() {
                   setSettingsOpen(true);
                 }}
               >
-                项目设置
+                {t(($) => $.app.toolbar.projectSettings)}
               </button>
             )}
             {session && (
@@ -900,10 +919,14 @@ export default function App() {
                 type="button"
                 className="editor-mode-toggle"
                 aria-pressed={livePreviewEnabled}
-                title="只改变编辑器显示，不改变 Markdown 原文"
+                title={t(($) => $.app.toolbar.livePreviewHint)}
                 onClick={() => setLivePreviewEnabled((enabled) => !enabled)}
               >
-                实时排版：{livePreviewEnabled ? "开" : "关"}
+                {t(($) => $.app.toolbar.livePreview, {
+                  state: livePreviewEnabled
+                    ? t(($) => $.app.toolbar.on)
+                    : t(($) => $.app.toolbar.off),
+                })}
               </button>
             )}
             {project && (
@@ -921,10 +944,10 @@ export default function App() {
                 onClick={handleSave}
               >
                 {saving && pendingImageCount > 0
-                  ? "等待图片…"
+                  ? t(($) => $.app.toolbar.waitingImages)
                   : saving
-                    ? "保存中…"
-                    : "保存 (Ctrl+S)"}
+                    ? t(($) => $.common.saving)
+                    : t(($) => $.app.toolbar.save)}
               </button>
             )}
           </div>
@@ -954,15 +977,15 @@ export default function App() {
         ) : (
           <div className="empty-state">
             {project
-              ? "从左侧打开或新建一篇文章"
-              : "打开一个包含 .blog-editor.json 的 Astro 博客项目"}
+              ? t(($) => $.app.empty.selectPost)
+              : t(($) => $.app.empty.openProject)}
           </div>
         )}
       </main>
 
       {session && project && (
         <aside className="fm-pane">
-          <h2>Frontmatter</h2>
+          <h2>{t(($) => $.frontmatter.title)}</h2>
           <FrontmatterForm
             fields={project.config.frontmatter.fields}
             session={session}
@@ -989,12 +1012,15 @@ export default function App() {
 
       {modal?.kind === "conflict" && (
         <Modal
-          title="文件在外部被修改"
-          message="磁盘上的内容与打开时不一致（可能来自 git 操作或其他编辑器）。保存已中止，请选择处理方式。"
+          title={t(($) => $.app.dialogs.conflict.title)}
+          message={t(($) => $.app.dialogs.conflict.message)}
           actions={[
-            { label: "重新加载（丢弃我的改动）", onClick: conflictReload },
             {
-              label: "用我的版本覆盖",
+              label: t(($) => $.app.dialogs.conflict.reload),
+              onClick: conflictReload,
+            },
+            {
+              label: t(($) => $.app.dialogs.conflict.overwrite),
               kind: "danger",
               onClick: conflictOverwrite,
             },
@@ -1003,22 +1029,24 @@ export default function App() {
       )}
       {modal?.kind === "recovery" && (
         <Modal
-          title="发现未保存的自动草稿"
-          message={`“${modal.document.id}”有一份 ${new Date(
-            modal.draft.savedAtMs,
-          ).toLocaleString()} 保存的恢复内容。${
+          title={t(($) => $.app.dialogs.recovery.title)}
+          message={t(
             modal.draft.baseRevision === modal.document.revision
-              ? "它基于当前磁盘版本。"
-              : "磁盘文件后来发生过变化；恢复后请先检查再保存。"
-          }`}
+              ? ($) => $.app.dialogs.recovery.messageCurrent
+              : ($) => $.app.dialogs.recovery.messageChanged,
+            {
+              id: modal.document.id,
+              savedAt: new Date(modal.draft.savedAtMs).toLocaleString(),
+            },
+          )}
           actions={[
             {
-              label: "使用磁盘版本",
+              label: t(($) => $.app.dialogs.recovery.useDisk),
               kind: "danger",
               onClick: keepDiskVersion,
             },
             {
-              label: "恢复草稿",
+              label: t(($) => $.app.dialogs.recovery.restore),
               kind: "primary",
               onClick: restoreRecoveryDraft,
             },
@@ -1027,27 +1055,30 @@ export default function App() {
       )}
       {modal?.kind === "close" && (
         <Modal
-          title="还有未保存的内容"
-          message="图片导入或文字修改尚未安全落盘。你可以先保存，也可以明确放弃后退出。"
+          title={t(($) => $.app.dialogs.close.title)}
+          message={t(($) => $.app.dialogs.close.message)}
           actions={[
-            { label: "取消", onClick: () => setModal(null) },
+            { label: t(($) => $.common.cancel), onClick: () => setModal(null) },
             {
-              label: "放弃并退出",
+              label: t(($) => $.app.dialogs.close.discardAndExit),
               kind: "danger",
               onClick: discardAndClose,
             },
-            { label: "保存并退出", onClick: saveAndClose },
+            {
+              label: t(($) => $.app.dialogs.close.saveAndExit),
+              onClick: saveAndClose,
+            },
           ]}
         />
       )}
       {modal?.kind === "discard" && (
         <Modal
-          title="有未保存的改动"
-          message="当前文章有未保存的改动，继续将恢复磁盘版本，并清理这次编辑中新粘贴但未保存引用的图片。"
+          title={t(($) => $.app.dialogs.discard.title)}
+          message={t(($) => $.app.dialogs.discard.message)}
           actions={[
-            { label: "取消", onClick: () => setModal(null) },
+            { label: t(($) => $.common.cancel), onClick: () => setModal(null) },
             {
-              label: "丢弃改动并继续",
+              label: t(($) => $.app.dialogs.discard.continue),
               kind: "danger",
               onClick: () => {
                 const { postId, projectGeneration, next } = modal;
@@ -1075,14 +1106,17 @@ export default function App() {
       )}
       {modal?.kind === "delete" && (
         <Modal
-          title="把文章移到废纸篓？"
-          message={`将把“${modal.id}”及正文直接引用的同目录图片移到系统废纸篓；目录里的其他文件会保留。${
-            modal.hasUnsavedChanges ? " 当前未保存的文字和图片改动也会丢失。" : ""
-          }`}
+          title={t(($) => $.app.dialogs.deletePost.title)}
+          message={t(
+            modal.hasUnsavedChanges
+              ? ($) => $.app.dialogs.deletePost.messageWithUnsaved
+              : ($) => $.app.dialogs.deletePost.message,
+            { id: modal.id },
+          )}
           actions={[
-            { label: "取消", onClick: () => setModal(null) },
+            { label: t(($) => $.common.cancel), onClick: () => setModal(null) },
             {
-              label: "移到废纸篓",
+              label: t(($) => $.app.dialogs.deletePost.confirm),
               kind: "danger",
               onClick: confirmDeletePost,
             },

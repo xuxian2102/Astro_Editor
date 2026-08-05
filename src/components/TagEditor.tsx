@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { filterSuggestions } from "../domain/tagSuggestions";
 
 interface TagEditorProps {
@@ -8,6 +9,7 @@ interface TagEditorProps {
 }
 
 export default function TagEditor({ value, onChange, suggestions = [] }: TagEditorProps) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
@@ -36,7 +38,7 @@ export default function TagEditor({ value, onChange, suggestions = [] }: TagEdit
             <button
               type="button"
               className="tag-remove"
-              aria-label={`移除标签 ${tag}`}
+              aria-label={t(($) => $.tags.remove, { tag })}
               onClick={() => onChange(value.filter((t) => t !== tag))}
             >
               ×
@@ -46,7 +48,7 @@ export default function TagEditor({ value, onChange, suggestions = [] }: TagEdit
         <input
           className="tag-input"
           value={draft}
-          placeholder="回车添加"
+          placeholder={t(($) => $.tags.placeholder)}
           onFocus={() => setOpen(true)}
           onChange={(e) => {
             setDraft(e.target.value);

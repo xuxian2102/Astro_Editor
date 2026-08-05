@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import {
   buildProjectConfig,
   createProjectSettingsDraft,
@@ -26,6 +28,7 @@ export default function ProjectSettingsDialog({
   onClose,
   onSave,
 }: ProjectSettingsDialogProps) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<ProjectSettingsDraft>(() =>
     createProjectSettingsDraft(project.config),
   );
@@ -74,13 +77,13 @@ export default function ProjectSettingsDialog({
       >
         <header className="settings-header">
           <div>
-            <h2 id="project-settings-title">项目设置</h2>
+            <h2 id="project-settings-title">{t(($) => $.settings.title)}</h2>
             <p title={project.root}>{project.root}</p>
           </div>
           <button
             type="button"
             className="settings-close"
-            aria-label="关闭项目设置"
+            aria-label={t(($) => $.settings.close)}
             disabled={saving}
             onClick={onClose}
           >
@@ -90,65 +93,65 @@ export default function ProjectSettingsDialog({
 
         <div className="settings-body">
           <section className="settings-section">
-            <h3>内容</h3>
+            <h3>{t(($) => $.settings.content)}</h3>
             <div className="settings-grid">
               <label className="settings-control settings-control-wide">
-                <span>内容目录</span>
+                <span>{t(($) => $.settings.contentDir)}</span>
                 <input type="text" value={draft.source.contentDir} readOnly />
-                <small>目录迁移会同时影响文章和图片，第一版只读。</small>
+                <small>{t(($) => $.settings.contentDirHint)}</small>
               </label>
               <label className="settings-control settings-control-wide">
-                <span>文章扩展名</span>
+                <span>{t(($) => $.settings.extensions)}</span>
                 <input
                   type="text"
                   value={draft.extensionsText}
-                  placeholder=".md, .markdown"
+                  placeholder={t(($) => $.settings.extensionsPlaceholder)}
                   disabled={saving}
                   onChange={(event) =>
                     setDraftValue("extensionsText", event.target.value)
                   }
                 />
-                <small>用逗号或空格分隔；当前打开文章的扩展名必须保留。</small>
+                <small>{t(($) => $.settings.extensionsHint)}</small>
               </label>
             </div>
           </section>
 
           <section className="settings-section">
-            <h3>Astro 预览</h3>
+            <h3>{t(($) => $.settings.preview.title)}</h3>
             <div className="settings-grid">
               <label className="settings-control settings-control-wide">
-                <span>命令</span>
+                <span>{t(($) => $.settings.preview.command)}</span>
                 <input
                   type="text"
                   value={draft.previewCommand}
-                  placeholder="node_modules/.bin/astro"
+                  placeholder={t(($) => $.settings.preview.commandPlaceholder)}
                   disabled={saving}
                   onChange={(event) =>
                     setDraftValue("previewCommand", event.target.value)
                   }
                 />
-                <small>必须是项目内可执行文件的相对路径。</small>
+                <small>{t(($) => $.settings.preview.commandHint)}</small>
               </label>
               <label className="settings-control settings-control-wide">
-                <span>参数（每行一个）</span>
+                <span>{t(($) => $.settings.preview.args)}</span>
                 <textarea
                   rows={3}
                   value={draft.previewArgsText}
-                  placeholder={"dev\n--verbose"}
+                  placeholder={t(($) => $.settings.preview.argsPlaceholder)}
                   disabled={saving}
                   onChange={(event) =>
                     setDraftValue("previewArgsText", event.target.value)
                   }
                 />
-                <small>host 和 port 会由编辑器安全地追加，不需要写在这里。</small>
+                <small>{t(($) => $.settings.preview.argsHint)}</small>
               </label>
               <label className="settings-control">
-                <span>监听地址</span>
+                <span>{t(($) => $.settings.preview.host)}</span>
                 <input type="text" value="127.0.0.1" readOnly />
-                <small>固定为本机，避免开发服务器暴露到局域网。</small>
+                <small>{t(($) => $.settings.preview.hostHint)}</small>
               </label>
               <label className="settings-control">
-                <span>端口</span>
+                <span>{t(($) => $.settings.preview.port)}</span>
                 <input
                   type="number"
                   min={1}
@@ -163,18 +166,20 @@ export default function ProjectSettingsDialog({
                 />
               </label>
               <label className="settings-control settings-control-wide">
-                <span>文章路由模板</span>
+                <span>{t(($) => $.settings.preview.routeTemplate)}</span>
                 <input
                   type="text"
                   value={draft.routeTemplate}
-                  placeholder="/blog/{slug}"
+                  placeholder={t(($) => $.settings.preview.routeTemplatePlaceholder)}
                   disabled={saving}
                   onChange={(event) =>
                     setDraftValue("routeTemplate", event.target.value)
                   }
                 />
                 <small>
-                  使用 {"{slug}"} 代入文章 slug；留空时预览按钮只打开首页。
+                  {t(($) => $.settings.preview.routeTemplateHint, {
+                    slugToken: "{slug}",
+                  })}
                 </small>
               </label>
             </div>
@@ -183,8 +188,8 @@ export default function ProjectSettingsDialog({
           <section className="settings-section">
             <div className="settings-section-heading">
               <div>
-                <h3>Frontmatter 字段</h3>
-                <p>决定右侧属性面板和新建文章的初始字段，不会删除文章里的其他字段。</p>
+                <h3>{t(($) => $.settings.fields.title)}</h3>
+                <p>{t(($) => $.settings.fields.hint)}</p>
               </div>
               <button
                 type="button"
@@ -196,7 +201,7 @@ export default function ProjectSettingsDialog({
                   ])
                 }
               >
-                添加字段
+                {t(($) => $.settings.fields.add)}
               </button>
             </div>
 
@@ -204,11 +209,11 @@ export default function ProjectSettingsDialog({
               {draft.fields.map((field, index) => (
                 <div className="settings-field" key={index}>
                   <label className="settings-control">
-                    <span>字段名</span>
+                    <span>{t(($) => $.settings.fields.name)}</span>
                     <input
                       type="text"
                       value={field.name}
-                      placeholder="title"
+                      placeholder={t(($) => $.settings.fields.namePlaceholder)}
                       disabled={saving}
                       onChange={(event) =>
                         updateField(index, (current) => ({
@@ -219,7 +224,7 @@ export default function ProjectSettingsDialog({
                     />
                   </label>
                   <label className="settings-control">
-                    <span>类型</span>
+                    <span>{t(($) => $.settings.fields.type)}</span>
                     <select
                       value={field.type}
                       disabled={saving}
@@ -235,12 +240,14 @@ export default function ProjectSettingsDialog({
                       }}
                     >
                       {!isKnownFieldType(field.type) && (
-                        <option value={field.type}>{field.type}（自定义）</option>
+                        <option value={field.type}>
+                          {t(($) => $.settings.fields.customType, { type: field.type })}
+                        </option>
                       )}
-                      <option value="string">文本</option>
-                      <option value="date">日期</option>
-                      <option value="boolean">开关</option>
-                      <option value="tags">标签列表</option>
+                      <option value="string">{t(($) => $.settings.fields.string)}</option>
+                      <option value="date">{t(($) => $.settings.fields.date)}</option>
+                      <option value="boolean">{t(($) => $.settings.fields.boolean)}</option>
+                      <option value="tags">{t(($) => $.settings.fields.tags)}</option>
                     </select>
                   </label>
                   <label className="settings-check">
@@ -255,13 +262,17 @@ export default function ProjectSettingsDialog({
                         }))
                       }
                     />
-                    必填
+                    {t(($) => $.common.required)}
                   </label>
                   <button
                     type="button"
                     className="settings-remove-field"
-                    title={`移除字段 ${field.name || index + 1}`}
-                    aria-label={`移除字段 ${field.name || index + 1}`}
+                    title={t(($) => $.settings.fields.remove, {
+                      field: field.name || index + 1,
+                    })}
+                    aria-label={t(($) => $.settings.fields.remove, {
+                      field: field.name || index + 1,
+                    })}
                     disabled={saving}
                     onClick={() =>
                       setDraftValue(
@@ -270,7 +281,7 @@ export default function ProjectSettingsDialog({
                       )
                     }
                   >
-                    删除
+                    {t(($) => $.settings.fields.delete)}
                   </button>
 
                   <div className="settings-default">
@@ -291,7 +302,7 @@ export default function ProjectSettingsDialog({
                           })
                         }
                       />
-                      默认值
+                      {t(($) => $.settings.fields.defaultValue)}
                     </label>
                     {hasDefault(field) &&
                       renderDefaultControl(field, saving, (value) =>
@@ -304,7 +315,7 @@ export default function ProjectSettingsDialog({
                 </div>
               ))}
               {draft.fields.length === 0 && (
-                <p className="settings-empty-fields">尚未配置字段。</p>
+                <p className="settings-empty-fields">{t(($) => $.settings.fields.empty)}</p>
               )}
             </div>
           </section>
@@ -318,10 +329,10 @@ export default function ProjectSettingsDialog({
           )}
           <div className="settings-actions">
             <button type="button" disabled={saving} onClick={onClose}>
-              取消
+              {t(($) => $.common.cancel)}
             </button>
             <button type="submit" className="btn-primary" disabled={saving}>
-              {saving ? "保存中…" : "保存设置"}
+              {saving ? t(($) => $.common.saving) : t(($) => $.settings.save)}
             </button>
           </div>
         </footer>
@@ -347,26 +358,30 @@ function renderDefaultControl(
     case "boolean":
       return (
         <select
-          aria-label={`${field.name || "字段"}的默认值`}
+          aria-label={defaultValueLabel(field)}
           value={field.default === true ? "true" : "false"}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value === "true")}
         >
-          <option value="false">false</option>
-          <option value="true">true</option>
+          <option value="false">
+            {i18n.t(($) => $.settings.fields.booleanFalse)}
+          </option>
+          <option value="true">
+            {i18n.t(($) => $.settings.fields.booleanTrue)}
+          </option>
         </select>
       );
     case "tags":
       return (
         <input
           type="text"
-          aria-label={`${field.name || "字段"}的默认值`}
+          aria-label={defaultValueLabel(field)}
           value={
             Array.isArray(field.default)
               ? field.default.map(String).join(", ")
               : ""
           }
-          placeholder="astro, tutorial"
+          placeholder={i18n.t(($) => $.settings.fields.tagsPlaceholder)}
           disabled={disabled}
           onChange={(event) =>
             onChange(
@@ -382,7 +397,7 @@ function renderDefaultControl(
       return (
         <input
           type="date"
-          aria-label={`${field.name || "字段"}的默认值`}
+          aria-label={defaultValueLabel(field)}
           value={typeof field.default === "string" ? field.default : ""}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
@@ -392,7 +407,7 @@ function renderDefaultControl(
       return (
         <input
           type="text"
-          aria-label={`${field.name || "字段"}的默认值`}
+          aria-label={defaultValueLabel(field)}
           value={typeof field.default === "string" ? field.default : ""}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
@@ -402,11 +417,17 @@ function renderDefaultControl(
       return (
         <input
           type="text"
-          aria-label={`${field.name || "字段"}的默认值`}
+          aria-label={defaultValueLabel(field)}
           value={JSON.stringify(field.default) ?? ""}
-          title="自定义类型的默认值请直接在 .blog-editor.json 中维护"
+          title={i18n.t(($) => $.settings.fields.customDefaultHint)}
           readOnly
         />
       );
   }
+}
+
+function defaultValueLabel(field: FieldSpec): string {
+  return i18n.t(($) => $.settings.fields.defaultValueLabel, {
+    field: field.name || i18n.t(($) => $.common.field),
+  });
 }

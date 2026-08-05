@@ -1,4 +1,5 @@
 import type { FieldSpec, ProjectConfig } from "../lib/tauriApi";
+import i18n from "../i18n";
 
 export interface ProjectSettingsDraft {
   /** 保存时以打开设置那一刻的完整配置为基底，保留本 UI 不认识的结构。 */
@@ -40,7 +41,7 @@ export function buildProjectConfig(
     .map((value) => value.trim())
     .filter(Boolean);
   if (rawExtensions.length === 0) {
-    return invalid("至少保留一个文章扩展名");
+    return invalid(i18n.t(($) => $.settings.validation.extensionRequired));
   }
 
   const extensions = rawExtensions.map((extension) =>
@@ -49,11 +50,15 @@ export function buildProjectConfig(
   const extensionKeys = new Set<string>();
   for (const extension of extensions) {
     if (!/^\.[A-Za-z0-9_-]+$/.test(extension)) {
-      return invalid(`扩展名格式不正确：${extension}`);
+      return invalid(
+        i18n.t(($) => $.settings.validation.invalidExtension, { extension }),
+      );
     }
     const key = extension.toLowerCase();
     if (extensionKeys.has(key)) {
-      return invalid(`扩展名重复：${extension}`);
+      return invalid(
+        i18n.t(($) => $.settings.validation.duplicateExtension, { extension }),
+      );
     }
     extensionKeys.add(key);
   }
@@ -61,27 +66,31 @@ export function buildProjectConfig(
     activePostId !== null &&
     !extensions.some((extension) => activePostId.endsWith(extension))
   ) {
-    return invalid(`当前文章“${activePostId}”的扩展名必须继续保留`);
+    return invalid(
+      i18n.t(($) => $.settings.validation.activePostExtension, {
+        postId: activePostId,
+      }),
+    );
   }
 
   const command = draft.previewCommand.trim();
   if (command === "") {
-    return invalid("预览命令不能为空");
+    return invalid(i18n.t(($) => $.settings.validation.previewCommandRequired));
   }
   if (
     command.startsWith("/") ||
     command.includes("\\") ||
     command.split("/").some((part) => part === "." || part === "..")
   ) {
-    return invalid("预览命令必须是项目内的相对路径");
+    return invalid(i18n.t(($) => $.settings.validation.previewCommandRelative));
   }
 
   if (!/^\d+$/.test(draft.previewPortText.trim())) {
-    return invalid("预览端口必须是 1–65535 的整数");
+    return invalid(i18n.t(($) => $.settings.validation.previewPortRange));
   }
   const port = Number(draft.previewPortText.trim());
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-    return invalid("预览端口必须是 1–65535 的整数");
+    return invalid(i18n.t(($) => $.settings.validation.previewPortRange));
   }
 
   const routeTemplate = draft.routeTemplate.trim();
@@ -93,7 +102,7 @@ export function buildProjectConfig(
       routeTemplate.includes("\\") ||
       hasControlCharacter(routeTemplate))
   ) {
-    return invalid("路由模板必须是以单个 / 开头的站内路径");
+    return invalid(i18n.t(($) => $.settings.validation.routeTemplateInvalid));
   }
 
   const names = new Set<string>();
@@ -102,17 +111,26 @@ export function buildProjectConfig(
     const name = field.name.trim();
     const type = field.type.trim();
     if (name === "" || hasControlCharacter(name)) {
-      return invalid("Frontmatter 字段名不能为空或包含控制字符");
+      return invalid(i18n.t(($) => $.settings.validation.fieldNameInvalid));
     }
     if (names.has(name)) {
-      return invalid(`Frontmatter 字段名重复：${name}`);
+      return invalid(
+        i18n.t(($) => $.settings.validation.duplicateField, { name }),
+      );
     }
     names.add(name);
     if (type === "" || hasControlCharacter(type)) {
-      return invalid(`Frontmatter 字段“${name}”的类型不能为空`);
+      return invalid(
+        i18n.t(($) => $.settings.validation.fieldTypeRequired, { name }),
+      );
     }
     if (!defaultMatchesType(field.default, type)) {
-      return invalid(`Frontmatter 字段“${name}”的默认值与 ${type} 类型不匹配`);
+      return invalid(
+        i18n.t(($) => $.settings.validation.fieldDefaultMismatch, {
+          name,
+          type,
+        }),
+      );
     }
 
     const normalized: FieldSpec = { ...field, name, type };
@@ -129,7 +147,7 @@ export function buildProjectConfig(
     .map((argument) => argument.trim())
     .filter(Boolean);
   if (args.some((argument) => argument.includes("\0"))) {
-    return invalid("预览参数不能包含 NUL 字符");
+    return invalid(i18n.t(($) => $.settings.validation.argsNul));
   }
 
   return {

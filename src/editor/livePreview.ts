@@ -19,6 +19,7 @@ import {
   type LivePreviewImageState,
   type MarkdownImageDescriptor,
 } from "./livePreviewWidgets";
+import i18n from "../i18n";
 
 export { taskToggleChange } from "./livePreviewWidgets";
 export type { LivePreviewImageState } from "./livePreviewWidgets";
@@ -578,7 +579,7 @@ function addImageNode(
   if (!image) return false;
   const imageState = options.resolveImage?.(image.target) ?? {
     status: "error" as const,
-    message: "当前编辑器没有配置图片读取器",
+    message: i18n.t(($) => $.editor.livePreview.noImageReader),
   };
   const range = Decoration.replace({
     widget: new MarkdownImageWidget(image, imageState),
@@ -790,11 +791,14 @@ function directImageState(target: string): LivePreviewImageState | null {
   if (trimmed.startsWith("/")) {
     return {
       status: "error",
-      message: "站点根路径图片请在真实网页预览中查看",
+      message: i18n.t(($) => $.editor.livePreview.siteRootImage),
     };
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(trimmed)) {
-    return { status: "error", message: "不支持该图片 URL 协议" };
+    return {
+      status: "error",
+      message: i18n.t(($) => $.editor.livePreview.unsupportedImageProtocol),
+    };
   }
   return null;
 }
@@ -904,7 +908,10 @@ class LivePreviewPluginValue {
       return cached;
     }
     if (!this.config.loadImage) {
-      return { status: "error", message: "当前编辑器没有配置图片读取器" };
+      return {
+        status: "error",
+        message: i18n.t(($) => $.editor.livePreview.noImageReader),
+      };
     }
 
     const loading = { status: "loading" } as const;

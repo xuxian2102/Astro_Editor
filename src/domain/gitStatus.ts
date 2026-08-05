@@ -1,4 +1,5 @@
 import type { ChangeKind, FileChange, GitStatus } from "../lib/tauriApi";
+import i18n from "../i18n";
 
 export interface GroupedChanges {
   managed: FileChange[];
@@ -15,17 +16,23 @@ export function groupChanges(status: GitStatus): GroupedChanges {
   return { managed, other };
 }
 
-const LABELS: Record<ChangeKind, string> = {
-  added: "新增",
-  modified: "修改",
-  deleted: "删除",
-  renamed: "重命名",
-  untracked: "未跟踪",
-  unmerged: "冲突",
-};
-
 export function changeLabel(kind: ChangeKind): string {
-  return LABELS[kind] ?? kind;
+  switch (kind) {
+    case "added":
+      return i18n.t(($) => $.git.changes.added);
+    case "modified":
+      return i18n.t(($) => $.git.changes.modified);
+    case "deleted":
+      return i18n.t(($) => $.git.changes.deleted);
+    case "renamed":
+      return i18n.t(($) => $.git.changes.renamed);
+    case "untracked":
+      return i18n.t(($) => $.git.changes.untracked);
+    case "unmerged":
+      return i18n.t(($) => $.git.changes.unmerged);
+    default:
+      return kind;
+  }
 }
 
 export function canPublish(status: GitStatus): boolean {

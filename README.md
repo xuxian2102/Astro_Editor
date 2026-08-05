@@ -96,6 +96,15 @@ sudo pacman -S --needed sway wl-clipboard dbus ttf-dejavu
 pnpm test:e2e
 ```
 
+### 前端文案
+
+前端用户可见文案集中在 `src/i18n/zh-CN.ts`。React 组件使用类型安全的
+`useTranslation()` selector，非 React 模块使用同一个 i18n 实例；新增文案时先添加
+目录键，再在代码里按键引用。`pnpm test` 会扫描 `src`，阻止中文界面文案重新写回
+实现文件。Rust 命令错误、Git 发布错误和异步预览错误统一传输
+`{ code, params, fallback }`：已知错误码由前端目录翻译，未知错误码显示 Rust 提供的
+fallback，保证前后端升级期间仍有可读诊断。
+
 ## 诊断日志
 
 安装版把 Rust 后端的生命周期、清理失败和预览错误写入：

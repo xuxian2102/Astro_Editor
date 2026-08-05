@@ -1,3 +1,4 @@
+use crate::error::ErrorPayload;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -225,7 +226,7 @@ pub struct PublishResult {
     pub pushed: bool,
     /// "stage" | "commit" | "push"，None 表示全部成功（或未尝试推送）
     pub error_stage: Option<String>,
-    pub message: Option<String>,
+    pub error: Option<ErrorPayload>,
 }
 
 /// 预览服务生命周期状态机：Stopped → Starting → Ready → Stopping → Stopped。
@@ -254,7 +255,7 @@ pub enum PreviewStatus {
     },
     Failed {
         generation: u64,
-        message: String,
+        error: ErrorPayload,
         log_tail: String,
     },
 }
@@ -262,6 +263,8 @@ pub enum PreviewStatus {
 #[cfg(test)]
 mod tests {
     use super::PreviewStatus;
+    use super::PublishResult;
+    use crate::error::ErrorPayload;
 
     #[test]
     fn preview_status_uses_the_typescript_field_names() {
@@ -276,11 +279,33 @@ mod tests {
 
         let failed = serde_json::to_value(PreviewStatus::Failed {
             generation: 2,
-            message: "boom".into(),
+            error: ErrorPayload::new("preview_test", "boom"),
             log_tail: "details".into(),
         })
         .unwrap();
         assert_eq!(failed["logTail"], "details");
+        assert_eq!(failed["error"]["code"], "preview_test");
         assert!(failed.get("log_tail").is_none());
+    }
+
+    #[test]
+    fn publish_result_uses_structured_error_payload() {
+        let result = serde_json::to_value(PublishResult {
+            staged: false,
+            staged_files: vec![],
+            committed: false,
+            commit_hash: None,
+            pushed: false,
+            error_stage: Some("stage".into()),
+            error: Some(ErrorPayload::new(
+                "git_nothing_to_commit",
+                "没有可提交的改动",
+            )),
+        })
+        .unwrap();
+
+        assert_eq!(result["errorStage"], "stage");
+        assert_eq!(result["error"]["code"], "git_nothing_to_commit");
+        assert!(result.get("message").is_none());
     }
 }

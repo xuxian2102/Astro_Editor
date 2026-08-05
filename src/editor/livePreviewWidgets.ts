@@ -1,4 +1,5 @@
 import { EditorView, WidgetType } from "@codemirror/view";
+import i18n from "../i18n";
 
 export type LivePreviewImageState =
   | { status: "loading" }
@@ -23,7 +24,7 @@ export class CodeLanguageWidget extends WidgetType {
   toDOM() {
     const element = document.createElement("span");
     element.className = "cm-live-code-language";
-    element.textContent = this.language || "代码";
+    element.textContent = this.language || i18n.t(($) => $.editor.livePreview.code);
     element.setAttribute("aria-hidden", "true");
     return element;
   }
@@ -38,7 +39,10 @@ export class HorizontalRuleWidget extends WidgetType {
     const separator = document.createElement("span");
     separator.className = "cm-live-horizontal-rule";
     separator.setAttribute("role", "separator");
-    separator.setAttribute("aria-label", "分隔线");
+    separator.setAttribute(
+      "aria-label",
+      i18n.t(($) => $.editor.livePreview.horizontalRule),
+    );
     return separator;
   }
 }
@@ -95,7 +99,9 @@ export class TaskCheckboxWidget extends WidgetType {
     checkbox.checked = this.checked;
     checkbox.setAttribute(
       "aria-label",
-      this.checked ? "标记任务为未完成" : "标记任务为已完成",
+      this.checked
+        ? i18n.t(($) => $.editor.livePreview.taskIncomplete)
+        : i18n.t(($) => $.editor.livePreview.taskComplete),
     );
     checkbox.addEventListener("change", () => {
       view.dispatch({
@@ -152,7 +158,10 @@ export class MarkdownImageWidget extends WidgetType {
         "error",
         () => {
           wrapper.className = "cm-live-image cm-live-image-error";
-          wrapper.textContent = `图片无法加载：${this.image.alt || this.image.target}`;
+          wrapper.textContent = i18n.t(
+            ($) => $.editor.livePreview.imageLoadFailed,
+            { image: this.image.alt || this.image.target },
+          );
           view.requestMeasure();
         },
         { once: true },
@@ -161,8 +170,12 @@ export class MarkdownImageWidget extends WidgetType {
     } else {
       wrapper.textContent =
         this.state.status === "loading"
-          ? `图片加载中：${this.image.alt || this.image.target}`
-          : `图片预览失败：${this.state.message}`;
+          ? i18n.t(($) => $.editor.livePreview.imageLoading, {
+              image: this.image.alt || this.image.target,
+            })
+          : i18n.t(($) => $.editor.livePreview.imagePreviewFailed, {
+              error: this.state.message,
+            });
       if (this.state.status === "error") wrapper.title = this.image.target;
     }
     return wrapper;

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { FieldSpec } from "../lib/tauriApi";
 import type { PostSession } from "../domain/postSession";
 import type { FrontmatterDocument } from "../domain/frontmatterDocument";
@@ -20,14 +21,15 @@ export default function FrontmatterForm({
   onAddFrontmatter,
   tagSuggestions,
 }: FrontmatterFormProps) {
+  const { t } = useTranslation();
   const fm = session.fmDoc;
 
   if (!fm) {
     return (
       <div className="fm-form fm-empty">
-        <p>此文件没有 frontmatter。</p>
+        <p>{t(($) => $.frontmatter.missing)}</p>
         <button type="button" onClick={onAddFrontmatter}>
-          添加 frontmatter
+          {t(($) => $.frontmatter.add)}
         </button>
       </div>
     );
@@ -40,16 +42,16 @@ export default function FrontmatterForm({
           <span className="fm-label">
             {field.name}
             {field.required && fm.getString(field.name) === "" && (
-              <em className="fm-required">必填</em>
+              <em className="fm-required">{t(($) => $.common.required)}</em>
             )}
           </span>
           {renderControl(field, fm, onEdit, tagSuggestions)}
         </label>
       ))}
       {fields.length === 0 && (
-        <p className="fm-hint">配置里没有声明 frontmatter 字段。</p>
+        <p className="fm-hint">{t(($) => $.frontmatter.noConfiguredFields)}</p>
       )}
-      <p className="fm-hint">未在此列出的字段会原样保留。</p>
+      <p className="fm-hint">{t(($) => $.frontmatter.preservedFields)}</p>
     </div>
   );
 }

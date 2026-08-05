@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 const marker = "E2E-WEBKITGTK-SMOKE";
 const arrowUp = "\uE013";
 const control = "\uE009";
+const enter = "\uE007";
 const workspaceRoot = resolve(import.meta.dirname, "../../..");
 const clipboardFixture = join(
   workspaceRoot,
@@ -79,6 +80,19 @@ describe("WebKitGTK editor smoke", () => {
       "隔离项目没有在 WebKitGTK 中自动打开",
       () => document.querySelector(".project-name") !== null,
     );
+
+    await click(".sidebar-actions button");
+    const createInput = await $(".sidebar-actions .inline-input");
+    await createInput.setValue("hello-astro.md");
+    await browser.keys(enter);
+    await waitForDom(
+      "结构化 Rust 错误没有经前端文案目录显示",
+      () =>
+        document
+          .querySelector(".error-banner")
+          ?.textContent?.includes("目标已存在：hello-astro.md"),
+    );
+    await click(".error-banner button");
 
     const opened = await browser.execute(() => {
       const post = [...document.querySelectorAll("button.post-open")].find(

@@ -1,5 +1,29 @@
-use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorPayload {
+    pub code: String,
+    pub params: BTreeMap<String, Value>,
+    pub fallback: String,
+}
+
+impl ErrorPayload {
+    pub fn new(code: impl Into<String>, fallback: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            params: BTreeMap::new(),
+            fallback: fallback.into(),
+        }
+    }
+
+    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.params.insert(key.into(), value.into());
+        self
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -46,20 +70,76 @@ impl AppError {
             AppError::Preview(_) => "preview",
         }
     }
+
+    pub fn payload(&self) -> ErrorPayload {
+        let payload = ErrorPayload::new(self.code(), self.to_string());
+        match self {
+            AppError::NoProject
+            | AppError::StaleProjectSession
+            | AppError::ExternalModificationConflict => payload,
+            AppError::InvalidProject(detail)
+            | AppError::Config(detail)
+            | AppError::Io(detail)
+            | AppError::Clipboard(detail)
+            | AppError::Git(detail)
+            | AppError::Preview(detail) => payload.with_param("detail", detail.clone()),
+            AppError::InvalidPostId(id) | AppError::NotFound(id) => {
+                payload.with_param("id", id.clone())
+            }
+            AppError::AlreadyExists(target) => payload.with_param("target", target.clone()),
+        }
+    }
 }
 
-// 前端拿到 { code, message }，靠 code 区分冲突等需要特殊 UI 的错误
+// 所有 Tauri 命令错误统一为 { code, params, fallback }。前端优先按 code 翻译，
+// 新旧版本不认识该 code 时仍可展示 fallback，不能把诊断退化成 [object Object]。
 impl Serialize for AppError {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("AppError", 2)?;
-        s.serialize_field("code", self.code())?;
-        s.serialize_field("message", &self.to_string())?;
-        s.end()
+        self.payload().serialize(serializer)
     }
 }
 
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         AppError::Io(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn serializes_parameterized_error_protocol() {
+        let value = serde_json::to_value(AppError::NotFound("nested/post.md".into())).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "code": "not_found",
+                "params": { "id": "nested/post.md" },
+                "fallback": "文章不存在：nested/post.md"
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_errors_without_parameters_as_empty_objects() {
+        let value = serde_json::to_value(AppError::NoProject).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "code": "no_project",
+                "params": {},
+                "fallback": "当前没有打开的项目"
+            })
+        );
+    }
+
+    #[test]
+    fn preserves_diagnostic_details_as_parameters_and_fallback() {
+        let payload = AppError::Io("permission denied".into()).payload();
+        assert_eq!(payload.params["detail"], "permission denied");
+        assert_eq!(payload.fallback, "IO 错误：permission denied");
     }
 }
