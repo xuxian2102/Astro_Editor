@@ -15,8 +15,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:perf:live-preview": "vitest run src/editor/livePreview.performance.test.ts --reporter=verbose",
-    "test:e2e:build": "pnpm build && cargo build --release --manifest-path src-tauri/Cargo.toml --features e2e,custom-protocol --bin blog-editor-e2e",
-    "test:e2e": "pnpm test:e2e:build && bash test/e2e/run-wayland.sh",
+    "test:e2e:build": "cargo build --manifest-path src-tauri/Cargo.toml --features e2e,custom-protocol --bin blog-editor-e2e",
+    "test:e2e": "pnpm build && pnpm test:e2e:build && bash test/e2e/run-wayland.sh",
     "tauri": "tauri"
   },
   "dependencies": {

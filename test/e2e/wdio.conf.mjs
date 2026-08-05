@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const application = join(
   workspaceRoot,
-  "src-tauri/target/release/blog-editor-e2e",
+  "src-tauri/target/debug/blog-editor-e2e",
 );
 const inheritedTestProject = process.env.BLOG_EDITOR_E2E_PROJECT;
 if (
