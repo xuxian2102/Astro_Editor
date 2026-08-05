@@ -1,6 +1,6 @@
 # Maintainer: xuxian
 pkgname=blog-editor-git
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Native Wayland Markdown editor for an Astro blog"
 arch=('x86_64')

@@ -105,8 +105,8 @@ pnpm test:e2e
 实现文件。Rust 命令错误、Git 发布错误和异步预览错误统一传输
 `{ code, params, fallback }`：已知错误码由前端目录翻译，未知错误码显示 Rust 提供的
 fallback，保证前后端升级期间仍有可读诊断。错误码及插值参数集中登记在
-`shared/error-codes.json`；Rust 测试、序列化器和 TypeScript 翻译表共同检查契约，新增
-错误码时缺少任一端实现都会让测试或构建失败。
+`shared/error-codes.json`；Rust 错误码注册表与命名构造器、TypeScript 翻译表共同检查
+契约，新增错误码时缺少任一端实现都会让测试或构建失败。
 
 `pnpm check` 使用 Biome 同时检查前端格式、React Hook 依赖和可访问性规则。生产主窗口
 还启用严格 CSP：脚本只允许应用自身资源，IPC 只允许 Tauri 通道；图片预览额外允许
