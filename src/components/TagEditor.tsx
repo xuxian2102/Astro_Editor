@@ -90,7 +90,6 @@ export default function TagEditor({
           }}
           onBlur={() => {
             setOpen(false);
-            commit();
           }}
         />
       </div>

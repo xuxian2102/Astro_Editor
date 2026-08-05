@@ -4,7 +4,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::error::{code, AppError, ErrorPayload};
+use crate::error::{AppError, ErrorPayload};
 use crate::model::{ChangeKind, FileChange, GitStatus, ProjectContext, PublishResult};
 
 const MAX_GIT_STREAM_BYTES: usize = 16 * 1024 * 1024;
@@ -311,25 +311,22 @@ fn current_commit_hash(root: &Path) -> Option<String> {
 
 fn classify_push_error(stderr: &str) -> ErrorPayload {
     if stderr.contains("has no upstream branch") {
-        ErrorPayload::new(
-            code::GIT_PUSH_NO_UPSTREAM,
+        ErrorPayload::git_push_no_upstream(
             "当前分支没有配置上游分支，请先在终端执行一次 git push -u <remote> <分支名>",
         )
     } else if stderr.contains("Authentication failed")
         || stderr.contains("could not read Username")
         || stderr.contains("Permission denied (publickey)")
     {
-        ErrorPayload::new(
-            code::GIT_PUSH_AUTHENTICATION_FAILED,
+        ErrorPayload::git_push_authentication_failed(
             "推送失败（认证问题）：请检查 git 凭证或 SSH key 配置",
         )
     } else {
         let trimmed = stderr.trim();
         if trimmed.is_empty() {
-            ErrorPayload::new(code::GIT_PUSH_FAILED, "推送失败")
+            ErrorPayload::git_push_failed("推送失败")
         } else {
-            ErrorPayload::new(code::GIT_PUSH_FAILED_DETAIL, format!("推送失败：{trimmed}"))
-                .with_param("detail", trimmed.to_owned())
+            ErrorPayload::git_push_failed_detail(format!("推送失败：{trimmed}"), trimmed.to_owned())
         }
     }
 }
@@ -355,13 +352,10 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             commit_hash: None,
             pushed: false,
             error_stage: Some("stage".into()),
-            error: Some(
-                ErrorPayload::new(
-                    code::GIT_UNRESOLVED_CONFLICTS,
-                    format!("存在未解决的 Git 冲突，发布已中止：{paths}"),
-                )
-                .with_param("paths", paths),
-            ),
+            error: Some(ErrorPayload::git_unresolved_conflicts(
+                format!("存在未解决的 Git 冲突，发布已中止：{paths}"),
+                paths,
+            )),
         });
     }
 
@@ -387,10 +381,7 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             commit_hash: None,
             pushed: false,
             error_stage: Some("stage".into()),
-            error: Some(ErrorPayload::new(
-                code::GIT_NOTHING_TO_COMMIT,
-                "没有可提交的改动",
-            )),
+            error: Some(ErrorPayload::git_nothing_to_commit("没有可提交的改动")),
         });
     }
 
@@ -406,10 +397,10 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             commit_hash: None,
             pushed: false,
             error_stage: Some("stage".into()),
-            error: Some(
-                ErrorPayload::new(code::GIT_STAGE_FAILED, format!("暂存失败：{detail}"))
-                    .with_param("detail", detail),
-            ),
+            error: Some(ErrorPayload::git_stage_failed(
+                format!("暂存失败：{detail}"),
+                detail,
+            )),
         });
     }
 
@@ -425,10 +416,10 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             commit_hash: None,
             pushed: false,
             error_stage: Some("commit".into()),
-            error: Some(
-                ErrorPayload::new(code::GIT_COMMIT_FAILED, format!("提交失败：{detail}"))
-                    .with_param("detail", detail),
-            ),
+            error: Some(ErrorPayload::git_commit_failed(
+                format!("提交失败：{detail}"),
+                detail,
+            )),
         });
     }
 
@@ -690,7 +681,7 @@ mod tests {
         assert!(!result.committed);
         assert_eq!(result.error_stage.as_deref(), Some("stage"));
         assert_eq!(
-            result.error.as_ref().map(|error| error.code.as_str()),
+            result.error.as_ref().map(ErrorPayload::code),
             Some("git_nothing_to_commit")
         );
     }
@@ -724,7 +715,7 @@ mod tests {
         assert!(!result.committed);
         assert_eq!(result.error_stage.as_deref(), Some("stage"));
         assert_eq!(
-            result.error.as_ref().map(|error| error.code.as_str()),
+            result.error.as_ref().map(ErrorPayload::code),
             Some("git_unresolved_conflicts")
         );
         assert_eq!(unmerged_after, unmerged_before);
@@ -767,7 +758,7 @@ mod tests {
         assert!(!result.pushed);
         assert_eq!(result.error_stage.as_deref(), Some("push"));
         assert_eq!(
-            result.error.as_ref().map(|error| error.code.as_str()),
+            result.error.as_ref().map(ErrorPayload::code),
             Some("git_push_no_upstream")
         );
     }

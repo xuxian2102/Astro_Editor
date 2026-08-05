@@ -1,7 +1,7 @@
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
-  useEffect,
+  useLayoutEffect,
   useRef,
 } from "react";
 
@@ -22,6 +22,14 @@ function topDialog(): HTMLElement | undefined {
   return activeDialogs.at(-1);
 }
 
+function syncDialogLayers() {
+  for (const [index, dialog] of activeDialogs.entries()) {
+    dialog
+      .closest<HTMLElement>(".modal-overlay")
+      ?.style.setProperty("--modal-stack-index", String(index));
+  }
+}
+
 function focusableElements(dialog: HTMLElement): HTMLElement[] {
   return Array.from(
     dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
@@ -34,7 +42,7 @@ export function useModalDialog<T extends HTMLElement>(
 ) {
   const dialogRef = useRef<T>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
@@ -43,6 +51,7 @@ export function useModalDialog<T extends HTMLElement>(
         ? document.activeElement
         : null;
     activeDialogs.push(dialog);
+    syncDialogLayers();
 
     const focusInitialElement = () => {
       const target =
@@ -68,6 +77,7 @@ export function useModalDialog<T extends HTMLElement>(
       const wasTopDialog = topDialog() === dialog;
       const index = activeDialogs.lastIndexOf(dialog);
       if (index >= 0) activeDialogs.splice(index, 1);
+      syncDialogLayers();
       if (wasTopDialog && previouslyFocused?.isConnected) {
         previouslyFocused.focus();
       }

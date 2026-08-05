@@ -93,11 +93,10 @@ export default function MarkdownEditor({
   const configuredLivePreviewRef = useRef(configuredLivePreview);
   configuredLivePreviewRef.current = configuredLivePreview;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionKey 是编辑器实例的语义身份，变化时即使正文相同也必须重建。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    // sessionKey 是编辑器实例的语义身份；即使正文相同，切换文章也必须重建状态。
-    container.dataset.sessionKey = sessionKey;
 
     // 部分 WebKitGTK 版本在图片 Ctrl+V 时连可用的 paste 事件都不给。keydown 先安排
     // 一个延迟兜底；正常 paste 一到就取消，因此标准图片和文本都不会重复处理。

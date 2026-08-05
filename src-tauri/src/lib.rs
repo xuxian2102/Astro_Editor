@@ -14,6 +14,24 @@ const LOG_FILE_NAME: &str = "blog-editor";
 const LOG_MAX_FILE_SIZE_BYTES: u128 = 1024 * 1024;
 const LOG_ARCHIVE_COUNT: usize = 2;
 
+#[cfg(feature = "e2e")]
+const E2E_CSP_MONITOR_SCRIPT: &str = r#"
+window.__blogEditorE2eCspViolations = [];
+document.addEventListener("securitypolicyviolation", (event) => {
+  window.__blogEditorE2eCspViolations.push({
+    blockedUri: event.blockedURI,
+    directive: event.effectiveDirective,
+  });
+});
+"#;
+
+#[cfg(feature = "e2e")]
+fn e2e_csp_monitor<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("e2e-csp-monitor")
+        .js_init_script(E2E_CSP_MONITOR_SCRIPT)
+        .build()
+}
+
 #[cfg(not(feature = "e2e"))]
 fn initial_app_state() -> AppState {
     AppState::default()
@@ -53,7 +71,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init());
     #[cfg(feature = "e2e")]
-    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    let builder = builder
+        // document-start 脚本先于 HTML 解析，能记录 WebDriver 连接前的启动期 CSP 违规。
+        .plugin(e2e_csp_monitor())
+        .plugin(tauri_plugin_wdio_webdriver::init());
 
     builder
         .manage(initial_app_state())

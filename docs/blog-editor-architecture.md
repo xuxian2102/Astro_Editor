@@ -83,8 +83,10 @@ fn main() {
 
 主窗口同时启用 CSP：`script-src` 只允许自身，`connect-src` 只允许 Tauri IPC；内嵌图片
 预览按实际功能放行 `blob:`、`data:` 与 HTTP(S)，不放行远程脚本。开发配置只比生产
-配置多出 Vite 本地 WebSocket。原生 WebKitGTK E2E 监听
-`securitypolicyviolation`，并在完成 IPC、CodeMirror 与 Blob 图片流程后断言没有策略阻断。
+配置多出 Vite 本地 WebSocket；桌面端 `tauri dev` 直接加载 Vite URL，因此
+`vite.config.ts` 会把同一份 `devCsp` 序列化成开发服务器响应头。原生 WebKitGTK E2E
+通过 document-start 初始化脚本监听 `securitypolicyviolation`，覆盖 HTML 解析和首批资源
+加载，并在完成 IPC、CodeMirror 与 Blob 图片流程后断言没有策略阻断。
 
 ---
 

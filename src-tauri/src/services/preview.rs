@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::{code, AppError, ErrorPayload};
+use crate::error::{AppError, ErrorPayload};
 use crate::model::{PreviewStatus, ProjectContext};
 use crate::services::posts;
 use crate::state::AppState;
@@ -16,6 +16,7 @@ use crate::state::AppState;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const PROBE_INTERVAL: Duration = Duration::from_millis(300);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_millis(1500);
+const LOG_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 const LOG_TAIL_MAX_LEN: usize = 4000;
 
 /// 预览服务生命周期状态；只存状态本身，不持有 Child——Child 由后台任务自己持有，
@@ -196,6 +197,42 @@ fn spawn_drain(
     })
 }
 
+/// 把子进程与它的输出读取任务绑在同一个生命周期里。只有完成输出收尾后才暴露
+/// log tail，避免 wait()/kill() 已返回但最后一段 stderr 仍在异步读取的竞态。
+struct PreviewProcess {
+    child: tokio::process::Child,
+    log_tail: Arc<TokioMutex<String>>,
+    drain_tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl PreviewProcess {
+    async fn finish_draining(&mut self) {
+        let tasks = std::mem::take(&mut self.drain_tasks);
+        // 后代进程可能意外继承 stdout/stderr pipe；这种情况下不能永久卡住状态机。
+        let _ = tokio::time::timeout(LOG_DRAIN_TIMEOUT, async move {
+            for task in tasks {
+                let _ = task.await;
+            }
+        })
+        .await;
+    }
+
+    async fn tail(&self) -> String {
+        self.log_tail.lock().await.clone()
+    }
+
+    async fn collect_after_exit(mut self) -> String {
+        self.finish_draining().await;
+        self.tail().await
+    }
+
+    async fn terminate_and_collect(mut self) -> String {
+        terminate_process_group(&mut self.child).await;
+        self.finish_draining().await;
+        self.tail().await
+    }
+}
+
 /// 只负责"用给定参数起一个进程"，不知道 astro 的 --host/--port 约定——
 /// 那是调用方（run_preview_lifecycle）的事，这样这个函数才能用任意命令单测
 fn build_command(exe: &Path, cwd: &Path, args: &[String]) -> tokio::process::Command {
@@ -232,16 +269,12 @@ async fn run_startup(
     port: u16,
     cancel_token: &CancellationToken,
     startup_timeout: Duration,
-) -> (
-    StartupOutcome,
-    Option<tokio::process::Child>,
-    Arc<TokioMutex<String>>,
-) {
+) -> (StartupOutcome, Option<PreviewProcess>) {
     let log_tail: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
 
     let mut child = match build_command(exe, cwd, args).spawn() {
         Ok(child) => child,
-        Err(e) => return (StartupOutcome::SpawnFailed(e.to_string()), None, log_tail),
+        Err(e) => return (StartupOutcome::SpawnFailed(e.to_string()), None),
     };
 
     let mut drain_tasks = Vec::with_capacity(2);
@@ -251,6 +284,11 @@ async fn run_startup(
     if let Some(stderr) = child.stderr.take() {
         drain_tasks.push(spawn_drain(stderr, log_tail.clone()));
     }
+    let mut process = PreviewProcess {
+        child,
+        log_tail,
+        drain_tasks,
+    };
 
     let deadline = tokio::time::sleep(startup_timeout);
     tokio::pin!(deadline);
@@ -259,11 +297,11 @@ async fn run_startup(
     let outcome = loop {
         tokio::select! {
             _ = cancel_token.cancelled() => break StartupOutcome::Cancelled,
-            exit = child.wait() => break StartupOutcome::ExitedEarly(exit),
+            exit = process.child.wait() => break StartupOutcome::ExitedEarly(exit),
             _ = &mut deadline => break StartupOutcome::TimedOut,
             _ = probe.tick() => {
                 if probe_ready(host, port).await {
-                    match child.try_wait() {
+                    match process.child.try_wait() {
                         Ok(None) => break StartupOutcome::Ready,
                         Ok(Some(status)) => break StartupOutcome::ExitedEarly(Ok(status)),
                         Err(error) => break StartupOutcome::ExitedEarly(Err(error)),
@@ -273,19 +311,7 @@ async fn run_startup(
         }
     };
 
-    // wait/try_wait 只说明进程结束，不保证独立的 stdout/stderr drain task 已经读到 EOF。
-    // 提前退出时先短暂等它们收尾，避免丢掉最关键的启动错误；若后代仍持有 pipe，
-    // 超时后让 task 继续后台退出，不能卡住预览状态机。
-    if matches!(&outcome, StartupOutcome::ExitedEarly(_)) {
-        let _ = tokio::time::timeout(Duration::from_millis(500), async {
-            for task in drain_tasks {
-                let _ = task.await;
-            }
-        })
-        .await;
-    }
-
-    (outcome, Some(child), log_tail)
+    (outcome, Some(process))
 }
 
 /// 存活阶段的结局：Ready 之后一直待在这里看守，直到取消或进程自己退出
@@ -524,11 +550,10 @@ async fn run_preview_lifecycle(
             generation,
             PreviewStatus::Failed {
                 generation,
-                error: ErrorPayload::new(
-                    code::PREVIEW_PORT_IN_USE,
+                error: ErrorPayload::preview_port_in_use(
                     format!("预览端口 {port} 已被占用，请停止占用进程或在项目设置中更换端口"),
-                )
-                .with_param("port", port),
+                    port,
+                ),
                 log_tail: String::new(),
             },
         )
@@ -543,7 +568,7 @@ async fn run_preview_lifecycle(
     args.push("--port".into());
     args.push(ctx.config.preview.port.to_string());
 
-    let (outcome, child, log_tail) = run_startup(
+    let (outcome, process) = run_startup(
         &exe,
         &ctx.root,
         &args,
@@ -561,64 +586,64 @@ async fn run_preview_lifecycle(
                 generation,
                 PreviewStatus::Failed {
                     generation,
-                    error: ErrorPayload::new(
-                        code::PREVIEW_SPAWN_FAILED,
+                    error: ErrorPayload::preview_spawn_failed(
                         format!("无法启动预览：{detail}"),
-                    )
-                    .with_param("detail", detail),
+                        detail,
+                    ),
                     log_tail: String::new(),
                 },
             )
             .await;
         }
         StartupOutcome::Cancelled => {
-            if let Some(mut child) = child {
-                terminate_process_group(&mut child).await;
+            if let Some(process) = process {
+                process.terminate_and_collect().await;
             }
             finish(&app, generation, PreviewStatus::Stopped).await;
         }
         StartupOutcome::ExitedEarly(exit) => {
             let exit = format!("{exit:?}");
-            let tail = log_tail.lock().await.clone();
+            let tail = match process {
+                Some(process) => process.collect_after_exit().await,
+                None => String::new(),
+            };
             finish(
                 &app,
                 generation,
                 PreviewStatus::Failed {
                     generation,
-                    error: ErrorPayload::new(
-                        code::PREVIEW_EXITED_EARLY,
+                    error: ErrorPayload::preview_exited_early(
                         format!("预览进程提前退出（{exit}）"),
-                    )
-                    .with_param("exit", exit),
+                        exit,
+                    ),
                     log_tail: tail,
                 },
             )
             .await;
         }
         StartupOutcome::TimedOut => {
-            if let Some(mut child) = child {
-                terminate_process_group(&mut child).await;
-            }
-            let tail = log_tail.lock().await.clone();
+            let tail = match process {
+                Some(process) => process.terminate_and_collect().await,
+                None => String::new(),
+            };
             let seconds = STARTUP_TIMEOUT.as_secs();
             finish(
                 &app,
                 generation,
                 PreviewStatus::Failed {
                     generation,
-                    error: ErrorPayload::new(
-                        code::PREVIEW_STARTUP_TIMEOUT,
+                    error: ErrorPayload::preview_startup_timeout(
                         format!("启动超时（{seconds} 秒内未就绪）"),
-                    )
-                    .with_param("seconds", seconds),
+                        seconds,
+                    ),
                     log_tail: tail,
                 },
             )
             .await;
         }
         StartupOutcome::Ready => {
-            let Some(mut child) = child else { return };
-            let pid = child.id().unwrap_or(0);
+            let Some(mut process) = process else { return };
+            let pid = process.child.id().unwrap_or(0);
             let url = format!("{}{}", base_url(&ctx), target_path);
             let applied = finish(
                 &app,
@@ -632,7 +657,7 @@ async fn run_preview_lifecycle(
             .await;
             if !applied {
                 // 已经被更晚一轮的启动/停止取代，这个进程不再需要
-                terminate_process_group(&mut child).await;
+                process.terminate_and_collect().await;
                 return;
             }
             if let Err(e) = navigate_preview_window(&app, &url) {
@@ -640,26 +665,25 @@ async fn run_preview_lifecycle(
             }
 
             // 存活阶段：Ready 之后继续待在这里，直到取消或进程自己退出
-            match run_steady(&mut child, &cancel_token).await {
+            match run_steady(&mut process.child, &cancel_token).await {
                 SteadyOutcome::Cancelled => {
-                    terminate_process_group(&mut child).await;
+                    process.terminate_and_collect().await;
                     if finish(&app, generation, PreviewStatus::Stopped).await {
                         close_preview_window(&app);
                     }
                 }
                 SteadyOutcome::ExitedUnexpectedly(exit) => {
                     let exit = format!("{exit:?}");
-                    let tail = log_tail.lock().await.clone();
+                    let tail = process.collect_after_exit().await;
                     if finish(
                         &app,
                         generation,
                         PreviewStatus::Failed {
                             generation,
-                            error: ErrorPayload::new(
-                                code::PREVIEW_EXITED_UNEXPECTEDLY,
+                            error: ErrorPayload::preview_exited_unexpectedly(
                                 format!("预览进程意外退出（{exit}）"),
-                            )
-                            .with_param("exit", exit),
+                                exit,
+                            ),
                             log_tail: tail,
                         },
                     )
@@ -837,7 +861,7 @@ mod tests {
     async fn run_startup_reaches_ready_when_server_responds() {
         let port = free_port();
         // 用 python3 http.server 当"假 astro dev"：不需要真的装 astro 也能验证探测逻辑
-        let (outcome, child, _log) = run_startup(
+        let (outcome, process) = run_startup(
             &PathBuf::from("python3"),
             Path::new("/tmp"),
             &[
@@ -855,13 +879,13 @@ mod tests {
         .await;
 
         assert!(matches!(outcome, StartupOutcome::Ready), "{outcome:?}");
-        let mut child = child.expect("Ready 时应当带回 child");
-        terminate_process_group(&mut child).await;
+        let process = process.expect("Ready 时应当带回 process");
+        process.terminate_and_collect().await;
     }
 
     #[tokio::test]
     async fn run_startup_reports_spawn_failure_for_missing_command() {
-        let (outcome, child, _log) = run_startup(
+        let (outcome, process) = run_startup(
             Path::new("/definitely/not/a/real/command"),
             Path::new("/tmp"),
             &[],
@@ -873,12 +897,12 @@ mod tests {
         .await;
 
         assert!(matches!(outcome, StartupOutcome::SpawnFailed(_)));
-        assert!(child.is_none());
+        assert!(process.is_none());
     }
 
     #[tokio::test]
     async fn run_startup_detects_process_exiting_early() {
-        let (outcome, _child, log) = run_startup(
+        let (outcome, process) = run_startup(
             &sh(),
             Path::new("/tmp"),
             &["-c".into(), "echo boom >&2; exit 1".into()],
@@ -890,16 +914,22 @@ mod tests {
         .await;
 
         assert!(matches!(outcome, StartupOutcome::ExitedEarly(_)));
-        let tail = log.lock().await.clone();
+        let tail = process
+            .expect("启动后提前退出应当带回 process")
+            .collect_after_exit()
+            .await;
         assert!(tail.contains("boom"));
     }
 
     #[tokio::test]
     async fn run_startup_times_out_when_nothing_ever_listens() {
-        let (outcome, child, _log) = run_startup(
+        let (outcome, process) = run_startup(
             &sh(),
             Path::new("/tmp"),
-            &["-c".into(), "sleep 30".into()],
+            &[
+                "-c".into(),
+                "trap 'echo timeout-final >&2; exit 0' TERM; while :; do sleep 1; done".into(),
+            ],
             "127.0.0.1",
             free_port(),
             &CancellationToken::new(),
@@ -908,7 +938,11 @@ mod tests {
         .await;
 
         assert!(matches!(outcome, StartupOutcome::TimedOut));
-        drop(child); // kill_on_drop 兜底清理
+        let tail = process
+            .expect("超时应当带回 process")
+            .terminate_and_collect()
+            .await;
+        assert!(tail.contains("timeout-final"));
     }
 
     #[tokio::test]
@@ -920,7 +954,7 @@ mod tests {
             token_clone.cancel();
         });
 
-        let (outcome, child, _log) = run_startup(
+        let (outcome, process) = run_startup(
             &sh(),
             Path::new("/tmp"),
             &["-c".into(), "sleep 30".into()],
@@ -932,7 +966,49 @@ mod tests {
         .await;
 
         assert!(matches!(outcome, StartupOutcome::Cancelled));
-        drop(child);
+        process
+            .expect("取消应当带回 process")
+            .terminate_and_collect()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn final_log_is_collected_after_ready_process_exits() {
+        let port = free_port();
+        let script = format!(
+            r#"import socket, sys, time
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('127.0.0.1', {port}))
+server.listen(1)
+connection, _ = server.accept()
+connection.recv(4096)
+connection.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
+connection.close()
+server.close()
+time.sleep(0.5)
+print('steady-final', file=sys.stderr, flush=True)
+"#
+        );
+        let (outcome, process) = run_startup(
+            &PathBuf::from("python3"),
+            Path::new("/tmp"),
+            &["-c".into(), script],
+            "127.0.0.1",
+            port,
+            &CancellationToken::new(),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(matches!(outcome, StartupOutcome::Ready), "{outcome:?}");
+        let mut process = process.expect("Ready 时应当带回 process");
+        assert!(matches!(
+            run_steady(&mut process.child, &CancellationToken::new()).await,
+            SteadyOutcome::ExitedUnexpectedly(_)
+        ));
+        let tail = process.collect_after_exit().await;
+        assert!(tail.contains("steady-final"));
     }
 
     /// 验证"避免 npm/pnpm 包一层导致杀不干净"：sh -c 起一个孙进程（sleep），

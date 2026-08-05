@@ -1,4 +1,3 @@
-use serde::ser::{Error as _, SerializeStruct as _};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -80,47 +79,85 @@ pub mod code {
     ];
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ErrorPayload {
-    pub code: String,
-    pub params: BTreeMap<String, Value>,
-    pub fallback: String,
-    expected_params: &'static [&'static str],
+    code: String,
+    params: BTreeMap<String, Value>,
+    fallback: String,
 }
 
 impl ErrorPayload {
-    pub fn new(code: ErrorCode, fallback: impl Into<String>) -> Self {
+    fn new(code: ErrorCode, fallback: impl Into<String>) -> Self {
         Self {
             code: code.name.to_owned(),
             params: BTreeMap::new(),
             fallback: fallback.into(),
-            expected_params: code.params,
         }
     }
 
-    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
+    fn with_param(mut self, key: &'static str, value: impl Into<Value>) -> Self {
         self.params.insert(key.into(), value.into());
         self
     }
-}
 
-impl Serialize for ErrorPayload {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let actual_params = self.params.keys().map(String::as_str).collect::<Vec<_>>();
-        let mut expected_params = self.expected_params.to_vec();
-        expected_params.sort_unstable();
-        if actual_params != expected_params {
-            return Err(S::Error::custom(format!(
-                "error code {} expects params {:?}, got {:?}",
-                self.code, expected_params, actual_params
-            )));
-        }
+    #[cfg(test)]
+    pub fn code(&self) -> &str {
+        &self.code
+    }
 
-        let mut state = serializer.serialize_struct("ErrorPayload", 3)?;
-        state.serialize_field("code", &self.code)?;
-        state.serialize_field("params", &self.params)?;
-        state.serialize_field("fallback", &self.fallback)?;
-        state.end()
+    pub fn git_unresolved_conflicts(fallback: impl Into<String>, paths: impl Into<String>) -> Self {
+        Self::new(code::GIT_UNRESOLVED_CONFLICTS, fallback).with_param("paths", paths.into())
+    }
+
+    pub fn git_nothing_to_commit(fallback: impl Into<String>) -> Self {
+        Self::new(code::GIT_NOTHING_TO_COMMIT, fallback)
+    }
+
+    pub fn git_stage_failed(fallback: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::new(code::GIT_STAGE_FAILED, fallback).with_param("detail", detail.into())
+    }
+
+    pub fn git_commit_failed(fallback: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::new(code::GIT_COMMIT_FAILED, fallback).with_param("detail", detail.into())
+    }
+
+    pub fn git_push_no_upstream(fallback: impl Into<String>) -> Self {
+        Self::new(code::GIT_PUSH_NO_UPSTREAM, fallback)
+    }
+
+    pub fn git_push_authentication_failed(fallback: impl Into<String>) -> Self {
+        Self::new(code::GIT_PUSH_AUTHENTICATION_FAILED, fallback)
+    }
+
+    pub fn git_push_failed(fallback: impl Into<String>) -> Self {
+        Self::new(code::GIT_PUSH_FAILED, fallback)
+    }
+
+    pub fn git_push_failed_detail(fallback: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::new(code::GIT_PUSH_FAILED_DETAIL, fallback).with_param("detail", detail.into())
+    }
+
+    pub fn preview_port_in_use(fallback: impl Into<String>, port: u16) -> Self {
+        Self::new(code::PREVIEW_PORT_IN_USE, fallback).with_param("port", port)
+    }
+
+    pub fn preview_spawn_failed(fallback: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::new(code::PREVIEW_SPAWN_FAILED, fallback).with_param("detail", detail.into())
+    }
+
+    pub fn preview_exited_early(fallback: impl Into<String>, exit: impl Into<String>) -> Self {
+        Self::new(code::PREVIEW_EXITED_EARLY, fallback).with_param("exit", exit.into())
+    }
+
+    pub fn preview_startup_timeout(fallback: impl Into<String>, seconds: u64) -> Self {
+        Self::new(code::PREVIEW_STARTUP_TIMEOUT, fallback).with_param("seconds", seconds)
+    }
+
+    pub fn preview_exited_unexpectedly(
+        fallback: impl Into<String>,
+        exit: impl Into<String>,
+    ) -> Self {
+        Self::new(code::PREVIEW_EXITED_UNEXPECTEDLY, fallback).with_param("exit", exit.into())
     }
 }
 
@@ -264,9 +301,11 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_serialize_payload_with_wrong_parameters() {
-        let payload = ErrorPayload::new(code::NOT_FOUND, "missing parameter");
-        let error = serde_json::to_value(payload).unwrap_err();
-        assert!(error.to_string().contains("expects params"));
+    fn named_payload_constructor_includes_its_required_parameter() {
+        let value =
+            serde_json::to_value(ErrorPayload::preview_port_in_use("port unavailable", 4321))
+                .unwrap();
+        assert_eq!(value["code"], "preview_port_in_use");
+        assert_eq!(value["params"], json!({ "port": 4321 }));
     }
 }

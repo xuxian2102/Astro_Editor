@@ -7,21 +7,23 @@ interface ModalAction {
   onClick: () => void;
 }
 
-interface ModalProps {
+interface ModalBaseProps {
   title: string;
   message: string;
   actions: ModalAction[];
-  /** 省略时 Escape 只会被拦截，不会绕过必须明确选择的操作。 */
-  onDismiss?: () => void;
 }
 
+type ModalProps = ModalBaseProps &
+  (
+    | { dismissible: true; onDismiss: () => void }
+    | { dismissible: false; onDismiss?: never }
+  );
+
 /** WebKitGTK 里不用 window.confirm/prompt，统一走应用内模态 */
-export default function Modal({
-  title,
-  message,
-  actions,
-  onDismiss,
-}: ModalProps) {
+export default function Modal(props: ModalProps) {
+  const { title, message, actions } = props;
+  // 必须明确声明是否可取消，避免新增对话框忘记接通 Escape。
+  const onDismiss = props.dismissible ? props.onDismiss : undefined;
   const id = useId();
   const titleId = `${id}-title`;
   const messageId = `${id}-message`;

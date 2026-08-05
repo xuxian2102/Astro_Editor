@@ -694,7 +694,7 @@ input[readonly] {
   background: rgb(0 0 0 / 45%);
   display: grid;
   place-items: center;
-  z-index: 10;
+  z-index: calc(10 + var(--modal-stack-index, 0));
 }
 
 .modal {
@@ -721,7 +721,6 @@ input[readonly] {
 }
 
 .settings-overlay {
-  z-index: 20;
   padding: 24px;
 }
 

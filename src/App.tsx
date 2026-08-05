@@ -973,6 +973,7 @@ export default function App() {
         <aside className="fm-pane">
           <h2>{t(($) => $.frontmatter.title)}</h2>
           <FrontmatterForm
+            key={editorSessionKey(session)}
             fields={project.config.frontmatter.fields}
             session={session}
             onEdit={handleFmEdit}
@@ -998,6 +999,7 @@ export default function App() {
 
       {modal?.kind === "conflict" && (
         <Modal
+          dismissible={false}
           title={t(($) => $.app.dialogs.conflict.title)}
           message={t(($) => $.app.dialogs.conflict.message)}
           actions={[
@@ -1015,6 +1017,7 @@ export default function App() {
       )}
       {modal?.kind === "recovery" && (
         <Modal
+          dismissible={false}
           title={t(($) => $.app.dialogs.recovery.title)}
           message={t(
             modal.draft.baseRevision === modal.document.revision
@@ -1041,6 +1044,7 @@ export default function App() {
       )}
       {modal?.kind === "close" && (
         <Modal
+          dismissible={true}
           title={t(($) => $.app.dialogs.close.title)}
           message={t(($) => $.app.dialogs.close.message)}
           actions={[
@@ -1060,6 +1064,7 @@ export default function App() {
       )}
       {modal?.kind === "discard" && (
         <Modal
+          dismissible={true}
           title={t(($) => $.app.dialogs.discard.title)}
           message={t(($) => $.app.dialogs.discard.message)}
           actions={[
@@ -1091,6 +1096,7 @@ export default function App() {
       )}
       {modal?.kind === "delete" && (
         <Modal
+          dismissible={true}
           title={t(($) => $.app.dialogs.deletePost.title)}
           message={t(
             modal.hasUnsavedChanges

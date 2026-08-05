@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PostSummary, ProjectInfo } from "../lib/tauriApi";
 
@@ -31,11 +31,11 @@ export default function Sidebar({
   const createInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (creating) createInputRef.current?.focus();
   }, [creating]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!renamingId) return;
     renameInputRef.current?.focus();
     renameInputRef.current?.select();
@@ -78,7 +78,9 @@ export default function Sidebar({
                     setNewName("");
                   }
                 }}
-                onBlur={() => setCreating(false)}
+                onBlur={() =>
+                  dismissInlineEditAfterBlur(() => setCreating(false))
+                }
               />
             ) : (
               <button type="button" onClick={() => setCreating(true)}>
@@ -104,7 +106,9 @@ export default function Sidebar({
                         setRenamingId(null);
                       }
                     }}
-                    onBlur={() => setRenamingId(null)}
+                    onBlur={() =>
+                      dismissInlineEditAfterBlur(() => setRenamingId(null))
+                    }
                   />
                 ) : (
                   <div
@@ -166,4 +170,14 @@ export default function Sidebar({
 function basename(path: string): string {
   const parts = path.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? path;
+}
+
+/** 普通失焦结束行内编辑；若失焦是因为模态框打开，则保留输入和恢复焦点目标。 */
+function dismissInlineEditAfterBlur(dismiss: () => void) {
+  requestAnimationFrame(() => {
+    const modalOpen = document.querySelector(
+      '[role="dialog"][aria-modal="true"]',
+    );
+    if (!modalOpen) dismiss();
+  });
 }

@@ -73,15 +73,14 @@ describe("WebKitGTK editor smoke", () => {
     // Tauri 插件做自动聚焦；后续仍由嵌入式 WebDriver 驱动当前 WebKitGTK。
     const windowHandle = await browser.getWindowHandle();
     await browser.switchToWindow(windowHandle);
-    await browser.execute(() => {
-      window.__blogEditorE2eCspViolations = [];
-      document.addEventListener("securitypolicyviolation", (event) => {
-        window.__blogEditorE2eCspViolations.push({
-          blockedUri: event.blockedURI,
-          directive: event.effectiveDirective,
-        });
-      });
-    });
+    const cspMonitorInstalled = await browser.execute(() =>
+      Array.isArray(window.__blogEditorE2eCspViolations),
+    );
+    assert.equal(
+      cspMonitorInstalled,
+      true,
+      "document-start CSP 监听器没有安装",
+    );
 
     await waitForDom(
       "隔离项目没有在 WebKitGTK 中自动打开",
@@ -162,6 +161,142 @@ describe("WebKitGTK editor smoke", () => {
     await waitForDom(
       "CodeMirror 没有挂载",
       () => document.querySelector(".editor-host .cm-editor") !== null,
+    );
+
+    const tagInput = await $(".fm-pane .tag-input");
+    await tagInput.setValue("javas");
+    await click("button.post-delete");
+    await waitForDom("删除确认框没有打开", () =>
+      Boolean(document.querySelector(".modal")),
+    );
+    const tagStateWhileModalOpen = await browser.execute(() => ({
+      draft:
+        document.querySelector(".fm-pane .tag-input") instanceof
+        HTMLInputElement
+          ? document.querySelector(".fm-pane .tag-input").value
+          : null,
+      accidentallyCommitted: [
+        ...document.querySelectorAll(".fm-pane .tag-chip"),
+      ].some((tag) => tag.textContent?.includes("javas")),
+    }));
+    assert.deepEqual(tagStateWhileModalOpen, {
+      draft: "javas",
+      accidentallyCommitted: false,
+    });
+    await browser.execute(() => {
+      document
+        .querySelector(".modal")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    await waitForDom(
+      "关闭无关弹窗后没有恢复未确认标签及其焦点",
+      () =>
+        document.activeElement ===
+          document.querySelector(".fm-pane .tag-input") &&
+        document.querySelector(".fm-pane .tag-input")?.value === "javas",
+    );
+    await tagInput.setValue("");
+
+    await click("button.post-rename");
+    const renameInput = await $(".post-list .inline-input");
+    await renameInput.setValue("hello-astro-v2.md");
+    await click('button[aria-haspopup="dialog"]');
+    await waitForDom(
+      "项目设置打开时丢失了正在编辑的重命名",
+      () =>
+        document.querySelector(".settings-modal") !== null &&
+        document.querySelector(".post-list .inline-input")?.value ===
+          "hello-astro-v2.md",
+    );
+    await browser.execute(() => {
+      document
+        .querySelector(".settings-modal")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    await waitForDom(
+      "关闭项目设置后没有恢复重命名输入框及其焦点",
+      () =>
+        document.activeElement ===
+          document.querySelector(".post-list .inline-input") &&
+        document.querySelector(".post-list .inline-input")?.value ===
+          "hello-astro-v2.md",
+    );
+    await browser.execute(() => {
+      document
+        .querySelector(".post-list .inline-input")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    await waitForDom("Escape 没有取消重命名", () =>
+      Boolean(document.querySelector("button.post-rename")),
+    );
+
+    await click('button[aria-haspopup="dialog"]');
+    await waitForDom("项目设置没有再次打开", () =>
+      Boolean(document.querySelector(".settings-modal")),
+    );
+    await click("button.post-delete");
+    await waitForDom("设置上方的确认框没有打开", () =>
+      Boolean(
+        document.querySelector(".settings-modal") &&
+          document.querySelector(".modal"),
+      ),
+    );
+    const stackedModalState = await browser.execute(() => {
+      const settings = document.querySelector(".settings-overlay");
+      const confirmation = document
+        .querySelector(".modal")
+        ?.closest(".modal-overlay");
+      const confirmationDialog = document.querySelector(".modal");
+      if (
+        !(settings instanceof HTMLElement) ||
+        !(confirmation instanceof HTMLElement)
+      ) {
+        return null;
+      }
+      return {
+        settingsZIndex: Number.parseInt(getComputedStyle(settings).zIndex, 10),
+        confirmationZIndex: Number.parseInt(
+          getComputedStyle(confirmation).zIndex,
+          10,
+        ),
+        focusInConfirmation:
+          confirmationDialog?.contains(document.activeElement) ?? false,
+      };
+    });
+    assert.ok(stackedModalState, "无法读取叠加弹窗状态");
+    assert.ok(
+      stackedModalState.confirmationZIndex > stackedModalState.settingsZIndex,
+      `确认框没有显示在设置之上：${JSON.stringify(stackedModalState)}`,
+    );
+    assert.equal(stackedModalState.focusInConfirmation, true);
+    await browser.execute(() => {
+      document
+        .querySelector(".modal")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    await waitForDom(
+      "关闭上层确认框后没有把焦点还给项目设置",
+      () =>
+        document.querySelector(".modal") === null &&
+        document.activeElement?.id === "project-settings-title",
+    );
+    await browser.execute(() => {
+      document
+        .querySelector(".settings-modal")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    await waitForDom("叠加弹窗测试后项目设置没有关闭", () =>
+      Boolean(document.querySelector(".settings-modal") === null),
     );
 
     const deleteDialogOpened = await browser.execute(() => {
