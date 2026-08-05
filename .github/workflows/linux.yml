@@ -52,12 +52,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Node.js and pnpm
-        uses: pnpm/setup@v1
+      - name: Install Node.js
+        uses: actions/setup-node@v6
         with:
-          runtime: node@22
+          node-version-file: .nvmrc
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
           cache: true
-          install: false
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
