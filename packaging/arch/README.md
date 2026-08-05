@@ -22,5 +22,5 @@ sudo pacman -Rns blog-editor-git
 ```
 
 这是 VCS 包，只构建已经推送到 GitHub 的提交；工作区中的未提交内容不会进入安装包。
-项目暂未选择开源许可证，包元数据因此使用
-`LicenseRef-All-Rights-Reserved`。
+项目采用 Apache License 2.0；安装包会将完整许可证放在
+`/usr/share/licenses/blog-editor-git/LICENSE`。

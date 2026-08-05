@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc="Native Wayland Markdown editor for an Astro blog"
 arch=('x86_64')
 url="https://github.com/xuxian2102/Astro_Editor"
-license=('LicenseRef-All-Rights-Reserved')
+license=('Apache-2.0')
 depends=(
   'cairo'
   'dbus'
@@ -82,6 +82,6 @@ package() {
     "$pkgdir/usr/share/icons/hicolor/256x256/apps/dev.xuxian.blogeditor.png"
   install -Dm644 src-tauri/icons/icon.png \
     "$pkgdir/usr/share/icons/hicolor/512x512/apps/dev.xuxian.blogeditor.png"
-  install -Dm644 packaging/arch/UNLICENSED \
-    "$pkgdir/usr/share/licenses/$pkgname/UNLICENSED"
+  install -Dm644 LICENSE \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
