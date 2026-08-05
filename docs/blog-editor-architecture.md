@@ -347,7 +347,7 @@ PreviewManager、独立无权限的 preview 窗口、绑定 127.0.0.1、就绪�
 
 CI 在 GitHub Linux runner 的 `archlinux:base-devel` rolling 容器中安装 Arch 官方 `webkit2gtk-4.1`、Rust、Sway 和 `wl-clipboard`，执行前端测试（含性能预算）/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试、默认 feature 的 `tauri build --no-bundle`，最后由专用非 root 用户在 headless Sway 中执行原生 Wayland WebKitGTK E2E。测试显式清除 `DISPLAY` 并在 Sway 配置中关闭 XWayland，失败时不能回退到 X11。
 
-Arch 安装包位于 `packaging/arch`：`makepkg -si` 构建跟踪 GitHub `main` 的 `blog-editor-git`，安装二进制、desktop entry 与 hicolor 图标，并由 `/usr/bin/blog-editor` 包装器强制 `GDK_BACKEND=wayland`。没有 `WAYLAND_DISPLAY` 时包装器直接给出错误，不尝试 X11/XWayland。Tauri 自带 bundle 仅保留 AppImage 目标，不再生成 deb/rpm。
+Arch 安装包位于 `packaging/arch`：`makepkg -si` 构建跟踪 GitHub `main` 的 `blog-editor-git`，安装二进制、desktop entry 与 hicolor 图标，并由 `/usr/bin/blog-editor` 包装器强制 `GDK_BACKEND=wayland`。没有 `WAYLAND_DISPLAY` 时包装器直接给出错误，不尝试 X11/XWayland。Tauri 自带 bundle 已关闭；项目不生成 AppImage、deb 或 rpm。
 
 **阶段 5：Obsidian 式实时预览**
 ATX/Setext heading → strong → emphasis → strikethrough → inlineCode → link/autolink → fencedCode → image → horizontal rule → blockquote/list/task/table，IME/选区/复制/撤销测试作为验收的一部分，不是事后补充。
