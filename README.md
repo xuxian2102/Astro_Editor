@@ -96,9 +96,21 @@ sudo pacman -S --needed sway wl-clipboard dbus ttf-dejavu
 pnpm test:e2e
 ```
 
+## 诊断日志
+
+安装版把 Rust 后端的生命周期、清理失败和预览错误写入：
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/dev.xuxian.blogeditor/logs/blog-editor.log
+```
+
+单个文件最多 1 MiB，并保留最多两个轮转文件。应用不会主动记录文章正文或 Git
+凭证；错误消息可能含本机路径，提交问题前请自行检查。
+
 更详细的权限边界、文件事务、预览进程和图片资产设计见
 [`docs/blog-editor-architecture.md`](docs/blog-editor-architecture.md)。Arch 包说明见
-[`packaging/arch/README.md`](packaging/arch/README.md)。
+[`packaging/arch/README.md`](packaging/arch/README.md)。版本变更见
+[`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 许可证
 

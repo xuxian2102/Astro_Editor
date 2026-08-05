@@ -119,8 +119,16 @@ jobs:
 
       - name: Test native Wayland WebKitGTK desktop
         run: |
+          close_smoke_binary=""
+          close_smoke_expect_file_log=0
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            close_smoke_binary=src-tauri/target/release/blog-editor
+            close_smoke_expect_file_log=1
+          fi
           runuser --user blog-editor-ci -- \
             env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
             HOME=/home/blog-editor-ci \
             PATH="$PATH" \
+            BLOG_EDITOR_CLOSE_SMOKE_BINARY="$close_smoke_binary" \
+            BLOG_EDITOR_CLOSE_SMOKE_EXPECT_FILE_LOG="$close_smoke_expect_file_log" \
             bash test/e2e/run-wayland.sh

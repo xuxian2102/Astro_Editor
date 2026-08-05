@@ -6,8 +6,13 @@ mod services;
 mod state;
 
 use tauri::Manager;
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use state::AppState;
+
+const LOG_FILE_NAME: &str = "blog-editor";
+const LOG_MAX_FILE_SIZE_BYTES: u128 = 1024 * 1024;
+const LOG_ARCHIVE_COUNT: usize = 2;
 
 #[cfg(not(feature = "e2e"))]
 fn initial_app_state() -> AppState {
@@ -28,7 +33,23 @@ fn initial_app_state() -> AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let log_target = if cfg!(debug_assertions) {
+        TargetKind::Stdout
+    } else {
+        TargetKind::LogDir {
+            file_name: Some(LOG_FILE_NAME.into()),
+        }
+    };
     let builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .clear_targets()
+                .target(Target::new(log_target))
+                .max_file_size(LOG_MAX_FILE_SIZE_BYTES)
+                .rotation_strategy(RotationStrategy::KeepSome(LOG_ARCHIVE_COUNT))
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init());
     #[cfg(feature = "e2e")]
@@ -36,14 +57,8 @@ pub fn run() {
 
     builder
         .manage(initial_app_state())
-        .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+        .setup(|_| {
+            log::info!("Blog Editor {} 已启动", env!("CARGO_PKG_VERSION"));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -75,6 +90,7 @@ pub fn run() {
         .run(|app_handle, event| {
             // 应用退出时的最后防线，正常路径已经在项目切换/主动停止里处理过
             if let tauri::RunEvent::Exit = event {
+                log::info!("应用退出清理开始");
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     let _content_guard = state.content_lock.lock().expect("content lock poisoned");
                     if let Err(error) = state
@@ -87,6 +103,7 @@ pub fn run() {
                     }
                     services::preview::best_effort_kill_on_exit(&state);
                 }
+                log::info!("应用退出清理完成");
             }
         });
 }
@@ -106,5 +123,17 @@ mod tests {
             .iter()
             .any(|permission| { permission.as_str() == Some("core:window:allow-destroy") }));
         assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    }
+
+    #[test]
+    fn release_version_is_consistent_across_manifests() {
+        let tauri_config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json"))
+                .expect("tauri config must be valid JSON");
+        let package: serde_json::Value = serde_json::from_str(include_str!("../../package.json"))
+            .expect("package manifest must be valid JSON");
+
+        assert_eq!(tauri_config["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(package["version"], env!("CARGO_PKG_VERSION"));
     }
 }

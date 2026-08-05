@@ -1,6 +1,6 @@
 [package]
 name = "blog-editor"
-version = "0.1.0"
+version = "0.1.1"
 description = "个人博客写作工具"
 authors = ["xuxian"]
 license = "Apache-2.0"
