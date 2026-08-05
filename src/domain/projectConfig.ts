@@ -1,5 +1,5 @@
-import type { FieldSpec, ProjectConfig } from "../lib/tauriApi";
 import i18n from "../i18n";
+import type { FieldSpec, ProjectConfig } from "../lib/tauriApi";
 
 export interface ProjectSettingsDraft {
   /** 保存时以打开设置那一刻的完整配置为基底，保留本 UI 不认识的结构。 */
@@ -188,7 +188,9 @@ function defaultMatchesType(value: unknown, type: string): boolean {
     case "boolean":
       return typeof value === "boolean";
     case "tags":
-      return Array.isArray(value) && value.every((item) => typeof item === "string");
+      return (
+        Array.isArray(value) && value.every((item) => typeof item === "string")
+      );
     case "date":
     case "string":
       return typeof value === "string";

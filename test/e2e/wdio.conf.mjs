@@ -1,9 +1,4 @@
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-} from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -28,7 +23,10 @@ const testProject =
 function copyFixture(relativePath) {
   const destination = join(testProject, relativePath);
   mkdirSync(dirname(destination), { recursive: true });
-  copyFileSync(join(workspaceRoot, "fixtures/test-blog", relativePath), destination);
+  copyFileSync(
+    join(workspaceRoot, "fixtures/test-blog", relativePath),
+    destination,
+  );
 }
 
 // 只复制 smoke 用例需要的受控文件，不把 node_modules、缓存或用户的 Photo_test

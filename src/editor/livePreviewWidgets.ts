@@ -1,4 +1,4 @@
-import { EditorView, WidgetType } from "@codemirror/view";
+import { type EditorView, WidgetType } from "@codemirror/view";
 import i18n from "../i18n";
 
 export type LivePreviewImageState =
@@ -24,7 +24,8 @@ export class CodeLanguageWidget extends WidgetType {
   toDOM() {
     const element = document.createElement("span");
     element.className = "cm-live-code-language";
-    element.textContent = this.language || i18n.t(($) => $.editor.livePreview.code);
+    element.textContent =
+      this.language || i18n.t(($) => $.editor.livePreview.code);
     element.setAttribute("aria-hidden", "true");
     return element;
   }
@@ -131,7 +132,8 @@ export class MarkdownImageWidget extends WidgetType {
       other.image.title === this.image.title &&
       other.state.status === this.state.status &&
       (other.state.status !== "ready" ||
-        (this.state.status === "ready" && other.state.src === this.state.src)) &&
+        (this.state.status === "ready" &&
+          other.state.src === this.state.src)) &&
       (other.state.status !== "error" ||
         (this.state.status === "error" &&
           other.state.message === this.state.message))

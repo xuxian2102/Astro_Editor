@@ -264,7 +264,7 @@ pub enum PreviewStatus {
 mod tests {
     use super::PreviewStatus;
     use super::PublishResult;
-    use crate::error::ErrorPayload;
+    use crate::error::{code, ErrorPayload};
 
     #[test]
     fn preview_status_uses_the_typescript_field_names() {
@@ -279,12 +279,12 @@ mod tests {
 
         let failed = serde_json::to_value(PreviewStatus::Failed {
             generation: 2,
-            error: ErrorPayload::new("preview_test", "boom"),
+            error: ErrorPayload::new(code::PREVIEW, "boom").with_param("detail", "boom"),
             log_tail: "details".into(),
         })
         .unwrap();
         assert_eq!(failed["logTail"], "details");
-        assert_eq!(failed["error"]["code"], "preview_test");
+        assert_eq!(failed["error"]["code"], "preview");
         assert!(failed.get("log_tail").is_none());
     }
 
@@ -298,7 +298,7 @@ mod tests {
             pushed: false,
             error_stage: Some("stage".into()),
             error: Some(ErrorPayload::new(
-                "git_nothing_to_commit",
+                code::GIT_NOTHING_TO_COMMIT,
                 "没有可提交的改动",
             )),
         })

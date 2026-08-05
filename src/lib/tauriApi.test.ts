@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { errorMessage, isAppError, type AppErrorPayload } from "./tauriApi";
+import errorCodeManifest from "../../shared/error-codes.json";
+import { type AppErrorPayload, errorMessage, isAppError } from "./tauriApi";
 
-function appError(
-  overrides: Partial<AppErrorPayload> = {},
-): AppErrorPayload {
+function appError(overrides: Partial<AppErrorPayload> = {}): AppErrorPayload {
   return {
     code: "not_found",
     params: { id: "nested/post.md" },
@@ -23,6 +22,16 @@ describe("Tauri error protocol", () => {
         }),
       ),
     ).toBe("预览端口 4321 已被占用，请停止占用进程或在项目设置中更换端口");
+  });
+
+  it("covers every code and parameter in the shared manifest", () => {
+    for (const [code, paramNames] of Object.entries(errorCodeManifest)) {
+      const fallback = `untranslated:${code}`;
+      const params = Object.fromEntries(
+        paramNames.map((name) => [name, `value:${name}`]),
+      );
+      expect(errorMessage({ code, params, fallback })).not.toBe(fallback);
+    }
   });
 
   it("uses fallback for unknown codes or missing parameters", () => {

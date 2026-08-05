@@ -1,5 +1,6 @@
 [package]
 name = "blog-editor"
+default-run = "blog-editor"
 version = "0.1.1"
 description = "个人博客写作工具"
 authors = ["xuxian"]

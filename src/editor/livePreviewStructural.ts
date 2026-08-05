@@ -1,10 +1,7 @@
-import { type EditorState, type Range } from "@codemirror/state";
-import { syntaxTree } from "@codemirror/language";
+import type { syntaxTree } from "@codemirror/language";
+import type { EditorState, Range } from "@codemirror/state";
 import { Decoration } from "@codemirror/view";
-import {
-  ListMarkerWidget,
-  TaskCheckboxWidget,
-} from "./livePreviewWidgets";
+import { ListMarkerWidget, TaskCheckboxWidget } from "./livePreviewWidgets";
 
 type SyntaxNode = ReturnType<typeof syntaxTree>["topNode"];
 type StructuralOwner = "blockquote" | "list" | "task" | "table";
@@ -210,18 +207,9 @@ function addListItemNode(
   visualRanges: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
 ) {
-  addLineDecorations(
-    options.state,
-    node.from,
-    node.to,
-    listLine,
-    visualRanges,
-  );
+  addLineDecorations(options.state, node.from, node.to, listLine, visualRanges);
   const marker = directChild(node, "ListMark");
-  if (
-    !marker ||
-    editingIntersectsNode(options, node.from, node.to)
-  ) {
+  if (!marker || editingIntersectsNode(options, node.from, node.to)) {
     return;
   }
 
@@ -243,9 +231,7 @@ function addListItemNode(
   }
 
   const ordered = node.parent?.name === "OrderedList";
-  const label = ordered
-    ? options.state.sliceDoc(marker.from, marker.to)
-    : "•";
+  const label = ordered ? options.state.sliceDoc(marker.from, marker.to) : "•";
   const range = Decoration.replace({
     widget: new ListMarkerWidget(label, ordered),
     livePreviewKind: "list-marker",
@@ -305,9 +291,7 @@ function addTableLineNode(
   options: StructuralPreviewOptions,
   visualRanges: Range<Decoration>[],
 ) {
-  visualRanges.push(
-    decoration.range(options.state.doc.lineAt(node.from).from),
-  );
+  visualRanges.push(decoration.range(options.state.doc.lineAt(node.from).from));
 }
 
 function addTableDelimiterNode(
@@ -334,10 +318,7 @@ function addTableDelimiterNode(
   );
 }
 
-function addTableCellNode(
-  node: SyntaxNode,
-  visualRanges: Range<Decoration>[],
-) {
+function addTableCellNode(node: SyntaxNode, visualRanges: Range<Decoration>[]) {
   const inHeader = ancestorNamed(node, "TableHeader") !== null;
   visualRanges.push(
     (inHeader ? tableHeaderCell : tableCell).range(node.from, node.to),

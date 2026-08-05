@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 // Tauri 开发时由 `tauri dev` 负责拉起本服务；端口需与 tauri.conf.json 的 devUrl 一致
 export default defineConfig({

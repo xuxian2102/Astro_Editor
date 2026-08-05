@@ -1,13 +1,14 @@
-import { useState, type FormEvent } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import i18n from "../i18n";
 import {
   buildProjectConfig,
   createProjectSettingsDraft,
   defaultValueForFieldType,
   type ProjectSettingsDraft,
 } from "../domain/projectConfig";
+import i18n from "../i18n";
 import type { FieldSpec, ProjectConfig, ProjectInfo } from "../lib/tauriApi";
+import { useModalDialog } from "./useModalDialog";
 
 const FIELD_TYPES = ["string", "date", "boolean", "tags"] as const;
 
@@ -33,6 +34,13 @@ export default function ProjectSettingsDialog({
     createProjectSettingsDraft(project.config),
   );
   const [validationError, setValidationError] = useState<string | null>(null);
+  const nextFieldIdRef = useRef(project.config.frontmatter.fields.length);
+  const [fieldIds, setFieldIds] = useState(() =>
+    project.config.frontmatter.fields.map((_, index) => `field-${index}`),
+  );
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const { dialogRef, handleDialogKeyDown } =
+    useModalDialog<HTMLFormElement>(titleRef);
 
   const setDraftValue = <Key extends keyof ProjectSettingsDraft>(
     key: Key,
@@ -55,6 +63,26 @@ export default function ProjectSettingsDialog({
     setValidationError(null);
   };
 
+  const addField = () => {
+    setDraftValue("fields", [
+      ...draft.fields,
+      { name: "", type: "string", required: false },
+    ]);
+    const id = `field-${nextFieldIdRef.current}`;
+    nextFieldIdRef.current += 1;
+    setFieldIds((current) => [...current, id]);
+  };
+
+  const removeField = (index: number) => {
+    setDraftValue(
+      "fields",
+      draft.fields.filter((_, fieldIndex) => fieldIndex !== index),
+    );
+    setFieldIds((current) =>
+      current.filter((_, fieldIndex) => fieldIndex !== index),
+    );
+  };
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const result = buildProjectConfig(draft, activePostId);
@@ -66,19 +94,40 @@ export default function ProjectSettingsDialog({
     onSave(result.config);
   };
 
+  const fieldsWithIds = draft.fields.map((field, index) => ({
+    field,
+    index,
+    id: fieldIds[index] ?? field.name,
+  }));
+
   return (
     <div className="modal-overlay settings-overlay">
       <form
+        ref={dialogRef}
         className="settings-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-settings-title"
+        aria-describedby={
+          validationError || serverError
+            ? "project-settings-path project-settings-error"
+            : "project-settings-path"
+        }
+        aria-busy={saving}
+        tabIndex={-1}
         onSubmit={submit}
+        onKeyDown={(event) =>
+          handleDialogKeyDown(event, saving ? undefined : onClose)
+        }
       >
         <header className="settings-header">
           <div>
-            <h2 id="project-settings-title">{t(($) => $.settings.title)}</h2>
-            <p title={project.root}>{project.root}</p>
+            <h2 ref={titleRef} id="project-settings-title" tabIndex={-1}>
+              {t(($) => $.settings.title)}
+            </h2>
+            <p id="project-settings-path" title={project.root}>
+              {project.root}
+            </p>
           </div>
           <button
             type="button"
@@ -170,7 +219,9 @@ export default function ProjectSettingsDialog({
                 <input
                   type="text"
                   value={draft.routeTemplate}
-                  placeholder={t(($) => $.settings.preview.routeTemplatePlaceholder)}
+                  placeholder={t(
+                    ($) => $.settings.preview.routeTemplatePlaceholder,
+                  )}
                   disabled={saving}
                   onChange={(event) =>
                     setDraftValue("routeTemplate", event.target.value)
@@ -191,23 +242,14 @@ export default function ProjectSettingsDialog({
                 <h3>{t(($) => $.settings.fields.title)}</h3>
                 <p>{t(($) => $.settings.fields.hint)}</p>
               </div>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() =>
-                  setDraftValue("fields", [
-                    ...draft.fields,
-                    { name: "", type: "string", required: false },
-                  ])
-                }
-              >
+              <button type="button" disabled={saving} onClick={addField}>
                 {t(($) => $.settings.fields.add)}
               </button>
             </div>
 
             <div className="settings-fields">
-              {draft.fields.map((field, index) => (
-                <div className="settings-field" key={index}>
+              {fieldsWithIds.map(({ field, index, id }) => (
+                <div className="settings-field" key={id}>
                   <label className="settings-control">
                     <span>{t(($) => $.settings.fields.name)}</span>
                     <input
@@ -241,13 +283,23 @@ export default function ProjectSettingsDialog({
                     >
                       {!isKnownFieldType(field.type) && (
                         <option value={field.type}>
-                          {t(($) => $.settings.fields.customType, { type: field.type })}
+                          {t(($) => $.settings.fields.customType, {
+                            type: field.type,
+                          })}
                         </option>
                       )}
-                      <option value="string">{t(($) => $.settings.fields.string)}</option>
-                      <option value="date">{t(($) => $.settings.fields.date)}</option>
-                      <option value="boolean">{t(($) => $.settings.fields.boolean)}</option>
-                      <option value="tags">{t(($) => $.settings.fields.tags)}</option>
+                      <option value="string">
+                        {t(($) => $.settings.fields.string)}
+                      </option>
+                      <option value="date">
+                        {t(($) => $.settings.fields.date)}
+                      </option>
+                      <option value="boolean">
+                        {t(($) => $.settings.fields.boolean)}
+                      </option>
+                      <option value="tags">
+                        {t(($) => $.settings.fields.tags)}
+                      </option>
                     </select>
                   </label>
                   <label className="settings-check">
@@ -274,12 +326,7 @@ export default function ProjectSettingsDialog({
                       field: field.name || index + 1,
                     })}
                     disabled={saving}
-                    onClick={() =>
-                      setDraftValue(
-                        "fields",
-                        draft.fields.filter((_, fieldIndex) => fieldIndex !== index),
-                      )
-                    }
+                    onClick={() => removeField(index)}
                   >
                     {t(($) => $.settings.fields.delete)}
                   </button>
@@ -294,7 +341,9 @@ export default function ProjectSettingsDialog({
                           updateField(index, (current) => {
                             const next = { ...current };
                             if (event.target.checked) {
-                              next.default = defaultValueForFieldType(current.type);
+                              next.default = defaultValueForFieldType(
+                                current.type,
+                              );
                             } else {
                               delete next.default;
                             }
@@ -315,7 +364,9 @@ export default function ProjectSettingsDialog({
                 </div>
               ))}
               {draft.fields.length === 0 && (
-                <p className="settings-empty-fields">{t(($) => $.settings.fields.empty)}</p>
+                <p className="settings-empty-fields">
+                  {t(($) => $.settings.fields.empty)}
+                </p>
               )}
             </div>
           </section>
@@ -323,7 +374,11 @@ export default function ProjectSettingsDialog({
 
         <footer className="settings-footer">
           {(validationError || serverError) && (
-            <p className="settings-error" role="alert">
+            <p
+              id="project-settings-error"
+              className="settings-error"
+              role="alert"
+            >
               {validationError ?? serverError}
             </p>
           )}

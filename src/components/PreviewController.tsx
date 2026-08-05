@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, errorMessage, type PreviewStatus } from "../lib/tauriApi";
 
@@ -30,9 +30,12 @@ export default function PreviewController({
   useEffect(() => {
     let disposed = false;
     // 必须先注册监听，再去同步一次当前状态——反过来的话，注册前发生的状态变化会被错过
-    const unlistenPromise = listen<PreviewStatus>("preview://status", (event) => {
-      if (!disposed) setStatus(event.payload);
-    });
+    const unlistenPromise = listen<PreviewStatus>(
+      "preview://status",
+      (event) => {
+        if (!disposed) setStatus(event.payload);
+      },
+    );
     api
       .getPreviewStatus()
       .then((s) => {
@@ -75,7 +78,11 @@ export default function PreviewController({
 
   return (
     <div className="preview-controller">
-      {error && <span className="preview-error" title={error}>⚠</span>}
+      {error && (
+        <span className="preview-error" title={error}>
+          ⚠
+        </span>
+      )}
       {status.phase === "stopped" && (
         <button type="button" onClick={start} disabled={preparing}>
           {preparing ? t(($) => $.preview.saving) : t(($) => $.preview.preview)}
@@ -92,7 +99,12 @@ export default function PreviewController({
       )}
       {status.phase === "ready" && (
         <>
-          <button type="button" onClick={start} title={status.url} disabled={preparing}>
+          <button
+            type="button"
+            onClick={start}
+            title={status.url}
+            disabled={preparing}
+          >
             {preparing ? t(($) => $.preview.saving) : t(($) => $.preview.open)}
           </button>
           <button type="button" onClick={() => void openUrl(status.url)}>
@@ -103,16 +115,22 @@ export default function PreviewController({
           </button>
         </>
       )}
-      {status.phase === "stopping" && <span>{t(($) => $.preview.stopping)}</span>}
+      {status.phase === "stopping" && (
+        <span>{t(($) => $.preview.stopping)}</span>
+      )}
       {status.phase === "failed" && (
         <div className="preview-failed">
-          <span className="preview-error-text">{errorMessage(status.error)}</span>
+          <span className="preview-error-text">
+            {errorMessage(status.error)}
+          </span>
           <button type="button" onClick={start} disabled={preparing}>
             {t(($) => $.preview.retry)}
           </button>
           {status.logTail && (
             <button type="button" onClick={() => setLogExpanded((v) => !v)}>
-              {logExpanded ? t(($) => $.preview.hideLog) : t(($) => $.preview.showLog)}
+              {logExpanded
+                ? t(($) => $.preview.hideLog)
+                : t(($) => $.preview.showLog)}
             </button>
           )}
           {logExpanded && status.logTail && (

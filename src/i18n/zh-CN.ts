@@ -153,8 +153,7 @@ export const zhCN = {
       delete: "删除",
       defaultValue: "默认值",
       defaultValueLabel: "{{field}}的默认值",
-      customDefaultHint:
-        "自定义类型的默认值请直接在 .blog-editor.json 中维护",
+      customDefaultHint: "自定义类型的默认值请直接在 .blog-editor.json 中维护",
       empty: "尚未配置字段。",
     },
     save: "保存设置",
@@ -198,7 +197,8 @@ export const zhCN = {
       fileTooLarge: "单张图片不能超过 25 MiB：{{name}}",
       batchTooLarge: "一次导入的图片总大小不能超过 100 MiB",
       anchorChanged: "图片导入位置已被编辑，本次插入已取消",
-      anchorChangedAfterRead: "图片已读取，但插入位置在等待期间被修改；未改动正文",
+      anchorChangedAfterRead:
+        "图片已读取，但插入位置在等待期间被修改；未改动正文",
     },
     livePreview: {
       code: "代码",

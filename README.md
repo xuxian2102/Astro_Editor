@@ -82,6 +82,7 @@ pnpm tauri dev
 常用检查：
 
 ```bash
+pnpm check
 pnpm test
 pnpm build
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
@@ -103,7 +104,14 @@ pnpm test:e2e
 目录键，再在代码里按键引用。`pnpm test` 会扫描 `src`，阻止中文界面文案重新写回
 实现文件。Rust 命令错误、Git 发布错误和异步预览错误统一传输
 `{ code, params, fallback }`：已知错误码由前端目录翻译，未知错误码显示 Rust 提供的
-fallback，保证前后端升级期间仍有可读诊断。
+fallback，保证前后端升级期间仍有可读诊断。错误码及插值参数集中登记在
+`shared/error-codes.json`；Rust 测试、序列化器和 TypeScript 翻译表共同检查契约，新增
+错误码时缺少任一端实现都会让测试或构建失败。
+
+`pnpm check` 使用 Biome 同时检查前端格式、React Hook 依赖和可访问性规则。生产主窗口
+还启用严格 CSP：脚本只允许应用自身资源，IPC 只允许 Tauri 通道；图片预览额外允许
+Blob、data URL 和 HTTP(S) 图片。自定义对话框会圈定键盘焦点，支持安全的 Escape
+取消，并在关闭后把焦点还给触发控件。
 
 ## 诊断日志
 

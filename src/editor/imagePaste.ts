@@ -1,13 +1,13 @@
 import {
+  type ChangeDesc,
+  type Extension,
   MapMode,
   StateEffect,
   StateField,
-  type ChangeDesc,
-  type Extension,
 } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { api, errorMessage } from "../lib/tauriApi";
 import i18n from "../i18n";
+import { api, errorMessage } from "../lib/tauriApi";
 
 export interface ImageInsertionRange {
   from: number;
@@ -126,8 +126,7 @@ function normalizedRange(
   view: EditorView,
   range: number | ImageInsertionRange,
 ): ImageInsertionRange {
-  const input =
-    typeof range === "number" ? { from: range, to: range } : range;
+  const input = typeof range === "number" ? { from: range, to: range } : range;
   const from = Math.max(0, Math.min(input.from, view.state.doc.length));
   const to = Math.max(from, Math.min(input.to, view.state.doc.length));
   return { from, to };
@@ -148,10 +147,7 @@ export function createImageInsertionAnchor(
   return id;
 }
 
-export function cancelImageInsertionAnchor(
-  view: EditorView,
-  id: string,
-): void {
+export function cancelImageInsertionAnchor(view: EditorView, id: string): void {
   if (!view.state.field(imageInsertionAnchorField, false)?.has(id)) return;
   view.dispatch({ effects: removeImageInsertionAnchor.of(id) });
 }
@@ -177,7 +173,8 @@ export function isPasteShortcut(
   );
 }
 
-const IMAGE_FILE_EXTENSION = /\.(?:avif|bmp|gif|ico|jfif|jpe?g|png|svg|tiff?|webp)$/i;
+const IMAGE_FILE_EXTENSION =
+  /\.(?:avif|bmp|gif|ico|jfif|jpe?g|png|svg|tiff?|webp)$/i;
 const NATIVE_FILE_CLIPBOARD_TYPES = new Set([
   "files",
   "text/uri-list",
@@ -257,8 +254,9 @@ export function markdownImageReference(relPath: string): string {
   const url = relPath
     .split("/")
     .map((segment) =>
-      encodeURIComponent(segment).replace(/[!'()*]/g, (char) =>
-        `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+      encodeURIComponent(segment).replace(
+        /[!'()*]/g,
+        (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
       ),
     )
     .join("/");

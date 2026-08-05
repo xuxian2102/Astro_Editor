@@ -26,7 +26,7 @@ describe("UI text catalog", () => {
       "// 中文注释",
       "/** 另一段中文注释 */",
       'const label = "界面文字";',
-      "const message = `操作 ${name} 完成`;",
+      "const message = `操作 $" + "{name} 完成`;",
       "const element = <p>按钮文字</p>;",
       "const pattern = /[?#]/;",
     ].join("\n");
@@ -39,8 +39,7 @@ describe("UI text catalog", () => {
 
 function isExcluded(path: string): boolean {
   return (
-    path.endsWith("/zh-CN.ts") ||
-    /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
+    path.endsWith("/zh-CN.ts") || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
   );
 }
 

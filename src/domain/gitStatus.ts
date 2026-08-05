@@ -1,5 +1,5 @@
-import type { ChangeKind, FileChange, GitStatus } from "../lib/tauriApi";
 import i18n from "../i18n";
+import type { ChangeKind, FileChange, GitStatus } from "../lib/tauriApi";
 
 export interface GroupedChanges {
   managed: FileChange[];

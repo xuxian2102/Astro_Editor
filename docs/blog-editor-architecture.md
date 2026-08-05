@@ -81,6 +81,11 @@ fn main() {
 
 `preview` 窗口不出现在任何授予这些命令的 capability 的 `windows` 列表里，因此默认无权调用。实现时以 Tauri 生成的 schema 为准核对具体权限标识符命名。
 
+主窗口同时启用 CSP：`script-src` 只允许自身，`connect-src` 只允许 Tauri IPC；内嵌图片
+预览按实际功能放行 `blob:`、`data:` 与 HTTP(S)，不放行远程脚本。开发配置只比生产
+配置多出 Vite 本地 WebSocket。原生 WebKitGTK E2E 监听
+`securitypolicyviolation`，并在完成 IPC、CodeMirror 与 Blob 图片流程后断言没有策略阻断。
+
 ---
 
 ## 目录结构
@@ -141,6 +146,9 @@ my-blog-editor/
 │       ├── TagEditor.tsx
 │       ├── PreviewController.tsx   # 请求启动/获取 URL/创建预览窗口，不直接承载网页
 │       └── GitPanel.tsx            # 提交 / 提交并推送 两个按钮
+├── shared/
+│   └── error-codes.json             # Rust/TypeScript 共用的错误码与参数契约
+├── biome.json                       # 前端格式、Hook 依赖与可访问性检查
 │
 ├── test/e2e/
 │   ├── run-wayland.sh              # 隔离 headless Wayland compositor，禁用 XWayland
@@ -197,6 +205,9 @@ struct PublishResult {
 Tauri 命令的 `AppError` 也序列化为同一个 `ErrorPayload`。前端优先按 `code` 从
 `src/i18n/zh-CN.ts` 选择文案并代入 `params`；不认识的错误码直接显示 `fallback`。
 因此命令拒绝、Git 部分成功和异步预览失败不会再形成三套互不兼容的字符串协议。
+`shared/error-codes.json` 是代码名和参数名清单：Rust 只允许用登记过的 `ErrorCode`
+构造 payload，序列化时拒绝缺失或多余参数；Rust 单测核对清单，TypeScript 用
+`satisfies Record<KnownAppErrorCode, ...>` 保证每个登记代码都有翻译函数。
 
 ```rust
 // state.rs —— 按用途分锁，避免一把大锁堵住所有命令
@@ -299,7 +310,7 @@ debug/E2E 构建只向 stdout 输出日志；release 构建只写 Tauri app-log 
 
 ### 6.1 WebKitGTK 验收与长文档预算
 
-- `pnpm test:e2e` 以 `e2e,custom-protocol` feature 构建独立的 `blog-editor-e2e` 测试二进制，在无 `DISPLAY` 的隔离 headless Wayland compositor 中，通过 `@wdio/tauri-service` 的嵌入式 WebDriver 驱动真实 WebKitGTK。用例覆盖自动打开项目、文章打开、实时/源码模式切换、键盘输入、删除线装饰、dirty 状态和保存；同时用 `wl-copy image/png` 设置真实 Wayland 剪贴板，再验证 Ctrl+V、Rust 原生读取、资产字节、内嵌图片与最终 Markdown 引用，以及中文组合开始时无关图片仍保持渲染。
+- `pnpm test:e2e` 以 `e2e,custom-protocol` feature 构建独立的 `blog-editor-e2e` 测试二进制，在无 `DISPLAY` 的隔离 headless Wayland compositor 中，通过 `@wdio/tauri-service` 的嵌入式 WebDriver 驱动真实 WebKitGTK。用例覆盖自动打开项目、对话框初始焦点/Tab 环绕/Escape/焦点恢复、文章打开、实时/源码模式切换、键盘输入、删除线装饰、dirty 状态和保存；同时用 `wl-copy image/png` 设置真实 Wayland 剪贴板，再验证 Ctrl+V、Rust 原生读取、资产字节、内嵌图片与最终 Markdown 引用、中文组合开始时无关图片仍保持渲染，以及全流程没有 CSP violation。
 - WebDriver 用例结束后复用同一个 debug 二进制，由 Sway IPC 向独立窗口发送真实 `xdg_toplevel.close` 并检查正常退出与生命周期日志，不增加第二轮编译。标签/手动发布构建改用 release 二进制执行这一步，并验证隔离 `XDG_DATA_HOME` 中的文件日志。
 - `tauri-plugin-wdio-webdriver` 是 optional dependency，只在 `e2e` feature 下注册。正常开发与发布构建不包含测试 HTTP 自动化端点。
 - E2E launcher 每次只把 `.blog-editor.json` 和受控的 `hello-astro.md` 复制到新建临时目录，Rust 侧自动打开项目的环境变量入口同样只在 `e2e` feature 存在；测试结束删除临时目录，不读写手测文章和真实博客。
@@ -362,7 +373,7 @@ PreviewManager、独立无权限的 preview 窗口、绑定 127.0.0.1、就绪�
 图片粘贴/拖拽、文件名冲突处理、标签索引与自动补全、项目配置 UI、删除文章及资产确认。
 当前检查点：图片粘贴/拖拽（含 WebKitGTK 原生兜底）、待提交清理、标签索引、重命名资产改写、可恢复删除、项目配置 UI、保存屏障、关闭/草稿恢复，以及实时排版核心节点和结构化块（引用、列表、任务项、表格、删除线、自动链接、分隔线、Setext 标题）均已完成。实时排版第一版的语法范围至此闭环；真实 WebKitGTK 打开/输入/模式切换/保存 smoke 与 1 MiB 长文档可见区性能预算也已落地，不继续无边界扩展语法。
 
-CI 在 GitHub Linux runner 的 `archlinux:base-devel` rolling 容器中安装 Arch 官方 `webkit2gtk-4.1`、Rust、Sway 和 `wl-clipboard`，执行前端测试（含性能预算）/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试，最后由专用非 root 用户在 headless Sway 中执行原生 Wayland WebKitGTK E2E。测试显式清除 `DISPLAY` 并在 Sway 配置中关闭 XWayland，失败时不能回退到 X11；`tauri build --no-bundle` 及 release 文件日志验收只在版本标签或手动发布时执行。
+CI 在 GitHub Linux runner 的 `archlinux:base-devel` rolling 容器中安装 Arch 官方 `webkit2gtk-4.1`、Rust、Sway 和 `wl-clipboard`，执行 Biome、前端测试（含性能预算）/构建、`cargo fmt`、Clippy `-D warnings`、Rust 测试，最后由专用非 root 用户在 headless Sway 中执行原生 Wayland WebKitGTK E2E。测试显式清除 `DISPLAY` 并在 Sway 配置中关闭 XWayland，失败时不能回退到 X11；`tauri build --no-bundle` 及 release 文件日志验收只在版本标签或手动发布时执行。
 
 Arch 安装包位于 `packaging/arch`：`makepkg -si` 构建跟踪 GitHub `main` 的 `blog-editor-git`，安装二进制、desktop entry 与 hicolor 图标，并由 `/usr/bin/blog-editor` 包装器强制 `GDK_BACKEND=wayland`。没有 `WAYLAND_DISPLAY` 时包装器直接给出错误，不尝试 X11/XWayland。Tauri 自带 bundle 已关闭；项目不生成 AppImage、deb 或 rpm。
 

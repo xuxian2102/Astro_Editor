@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canPublish, changeLabel, groupChanges } from "./gitStatus";
 import type { FileChange, GitStatus } from "../lib/tauriApi";
+import { canPublish, changeLabel, groupChanges } from "./gitStatus";
 
 function change(overrides: Partial<FileChange>): FileChange {
   return {

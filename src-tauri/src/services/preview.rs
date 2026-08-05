@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::{AppError, ErrorPayload};
+use crate::error::{code, AppError, ErrorPayload};
 use crate::model::{PreviewStatus, ProjectContext};
 use crate::services::posts;
 use crate::state::AppState;
@@ -175,7 +175,7 @@ async fn terminate_process_group(child: &mut tokio::process::Child) {
 fn spawn_drain(
     pipe: impl tokio::io::AsyncRead + Unpin + Send + 'static,
     buf: Arc<TokioMutex<String>>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut reader = tokio::io::BufReader::new(pipe);
         let mut chunk = [0u8; 1024];
@@ -193,7 +193,7 @@ fn spawn_drain(
                 guard.drain(..start);
             }
         }
-    });
+    })
 }
 
 /// 只负责"用给定参数起一个进程"，不知道 astro 的 --host/--port 约定——
@@ -244,11 +244,12 @@ async fn run_startup(
         Err(e) => return (StartupOutcome::SpawnFailed(e.to_string()), None, log_tail),
     };
 
+    let mut drain_tasks = Vec::with_capacity(2);
     if let Some(stdout) = child.stdout.take() {
-        spawn_drain(stdout, log_tail.clone());
+        drain_tasks.push(spawn_drain(stdout, log_tail.clone()));
     }
     if let Some(stderr) = child.stderr.take() {
-        spawn_drain(stderr, log_tail.clone());
+        drain_tasks.push(spawn_drain(stderr, log_tail.clone()));
     }
 
     let deadline = tokio::time::sleep(startup_timeout);
@@ -271,6 +272,18 @@ async fn run_startup(
             }
         }
     };
+
+    // wait/try_wait 只说明进程结束，不保证独立的 stdout/stderr drain task 已经读到 EOF。
+    // 提前退出时先短暂等它们收尾，避免丢掉最关键的启动错误；若后代仍持有 pipe，
+    // 超时后让 task 继续后台退出，不能卡住预览状态机。
+    if matches!(&outcome, StartupOutcome::ExitedEarly(_)) {
+        let _ = tokio::time::timeout(Duration::from_millis(500), async {
+            for task in drain_tasks {
+                let _ = task.await;
+            }
+        })
+        .await;
+    }
 
     (outcome, Some(child), log_tail)
 }
@@ -512,7 +525,7 @@ async fn run_preview_lifecycle(
             PreviewStatus::Failed {
                 generation,
                 error: ErrorPayload::new(
-                    "preview_port_in_use",
+                    code::PREVIEW_PORT_IN_USE,
                     format!("预览端口 {port} 已被占用，请停止占用进程或在项目设置中更换端口"),
                 )
                 .with_param("port", port),
@@ -549,7 +562,7 @@ async fn run_preview_lifecycle(
                 PreviewStatus::Failed {
                     generation,
                     error: ErrorPayload::new(
-                        "preview_spawn_failed",
+                        code::PREVIEW_SPAWN_FAILED,
                         format!("无法启动预览：{detail}"),
                     )
                     .with_param("detail", detail),
@@ -573,7 +586,7 @@ async fn run_preview_lifecycle(
                 PreviewStatus::Failed {
                     generation,
                     error: ErrorPayload::new(
-                        "preview_exited_early",
+                        code::PREVIEW_EXITED_EARLY,
                         format!("预览进程提前退出（{exit}）"),
                     )
                     .with_param("exit", exit),
@@ -594,7 +607,7 @@ async fn run_preview_lifecycle(
                 PreviewStatus::Failed {
                     generation,
                     error: ErrorPayload::new(
-                        "preview_startup_timeout",
+                        code::PREVIEW_STARTUP_TIMEOUT,
                         format!("启动超时（{seconds} 秒内未就绪）"),
                     )
                     .with_param("seconds", seconds),
@@ -643,7 +656,7 @@ async fn run_preview_lifecycle(
                         PreviewStatus::Failed {
                             generation,
                             error: ErrorPayload::new(
-                                "preview_exited_unexpectedly",
+                                code::PREVIEW_EXITED_UNEXPECTEDLY,
                                 format!("预览进程意外退出（{exit}）"),
                             )
                             .with_param("exit", exit),

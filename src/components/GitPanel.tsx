@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { canPublish, changeLabel, groupChanges } from "../domain/gitStatus";
 import {
   errorMessage,
   type FileChange,
   type GitStatus,
   type PublishResult,
 } from "../lib/tauriApi";
-import { canPublish, changeLabel, groupChanges } from "../domain/gitStatus";
 
 interface GitPanelProps {
   status: GitStatus | null;
@@ -34,7 +34,11 @@ export default function GitPanel({
       <section className="git-panel">
         <div className="git-panel-header">
           <h2>{t(($) => $.git.title)}</h2>
-          <button type="button" onClick={onRefresh} title={t(($) => $.common.refresh)}>
+          <button
+            type="button"
+            onClick={onRefresh}
+            title={t(($) => $.common.refresh)}
+          >
             ↻
           </button>
         </div>
@@ -66,7 +70,11 @@ export default function GitPanel({
     <section className="git-panel">
       <div className="git-panel-header">
         <h2>{t(($) => $.git.title)}</h2>
-        <button type="button" onClick={onRefresh} title={t(($) => $.common.refresh)}>
+        <button
+          type="button"
+          onClick={onRefresh}
+          title={t(($) => $.common.refresh)}
+        >
           ↻
         </button>
       </div>
@@ -102,7 +110,9 @@ export default function GitPanel({
           disabled={!ready}
           onClick={() => submit(true)}
         >
-          {publishing ? t(($) => $.git.publishing) : t(($) => $.git.commitAndPush)}
+          {publishing
+            ? t(($) => $.git.publishing)
+            : t(($) => $.git.commitAndPush)}
         </button>
       </div>
 
@@ -142,11 +152,28 @@ function PublishResultCard({ result }: { result: PublishResult }) {
   const { t } = useTranslation();
   const ok = result.errorStage === null;
   return (
-    <div className={ok ? "publish-result publish-ok" : "publish-result publish-partial"}>
+    <div
+      className={
+        ok ? "publish-result publish-ok" : "publish-result publish-partial"
+      }
+    >
       <div className="publish-steps">
-        <Step label={t(($) => $.git.stage)} done={result.staged} failed={result.errorStage === "stage"} />
-        <Step label={t(($) => $.git.commit)} done={result.committed} failed={result.errorStage === "commit"} />
-        <Step label={t(($) => $.git.push)} done={result.pushed} failed={result.errorStage === "push"} skipped={!result.committed} />
+        <Step
+          label={t(($) => $.git.stage)}
+          done={result.staged}
+          failed={result.errorStage === "stage"}
+        />
+        <Step
+          label={t(($) => $.git.commit)}
+          done={result.committed}
+          failed={result.errorStage === "commit"}
+        />
+        <Step
+          label={t(($) => $.git.push)}
+          done={result.pushed}
+          failed={result.errorStage === "push"}
+          skipped={!result.committed}
+        />
       </div>
       {result.commitHash && (
         <p className="publish-hash">
@@ -171,6 +198,12 @@ function Step({
   failed: boolean;
   skipped?: boolean;
 }) {
-  const state = failed ? "failed" : done ? "done" : skipped ? "skipped" : "pending";
+  const state = failed
+    ? "failed"
+    : done
+      ? "done"
+      : skipped
+        ? "skipped"
+        : "pending";
   return <span className={`publish-step publish-step-${state}`}>{label}</span>;
 }

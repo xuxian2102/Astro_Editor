@@ -9,8 +9,8 @@ describe("i18n", () => {
   });
 
   it("interpolates values through typed catalog keys", () => {
-    expect(
-      i18n.t(($) => $.sidebar.renamePost, { id: "nested/post.md" }),
-    ).toBe("重命名 nested/post.md");
+    expect(i18n.t(($) => $.sidebar.renamePost, { id: "nested/post.md" })).toBe(
+      "重命名 nested/post.md",
+    );
   });
 });

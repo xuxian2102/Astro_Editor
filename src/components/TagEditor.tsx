@@ -3,12 +3,18 @@ import { useTranslation } from "react-i18next";
 import { filterSuggestions } from "../domain/tagSuggestions";
 
 interface TagEditorProps {
+  inputId?: string;
   value: string[];
   onChange: (tags: string[]) => void;
   suggestions?: string[];
 }
 
-export default function TagEditor({ value, onChange, suggestions = [] }: TagEditorProps) {
+export default function TagEditor({
+  inputId,
+  value,
+  onChange,
+  suggestions = [],
+}: TagEditorProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
@@ -46,6 +52,7 @@ export default function TagEditor({ value, onChange, suggestions = [] }: TagEdit
           </span>
         ))}
         <input
+          id={inputId}
           className="tag-input"
           value={draft}
           placeholder={t(($) => $.tags.placeholder)}
@@ -61,7 +68,9 @@ export default function TagEditor({ value, onChange, suggestions = [] }: TagEdit
               setHighlighted((i) => (i + 1) % candidates.length);
             } else if (showDropdown && e.key === "ArrowUp") {
               e.preventDefault();
-              setHighlighted((i) => (i - 1 + candidates.length) % candidates.length);
+              setHighlighted(
+                (i) => (i - 1 + candidates.length) % candidates.length,
+              );
             } else if (e.key === "Enter" || e.key === ",") {
               e.preventDefault();
               if (showDropdown) {
@@ -71,7 +80,11 @@ export default function TagEditor({ value, onChange, suggestions = [] }: TagEdit
               }
             } else if (e.key === "Escape") {
               setOpen(false);
-            } else if (e.key === "Backspace" && draft === "" && value.length > 0) {
+            } else if (
+              e.key === "Backspace" &&
+              draft === "" &&
+              value.length > 0
+            ) {
               onChange(value.slice(0, -1));
             }
           }}
@@ -87,7 +100,9 @@ export default function TagEditor({ value, onChange, suggestions = [] }: TagEdit
             <li key={tag}>
               <button
                 type="button"
-                className={i === highlighted ? "tag-suggestion active" : "tag-suggestion"}
+                className={
+                  i === highlighted ? "tag-suggestion active" : "tag-suggestion"
+                }
                 onMouseDown={(e) => {
                   e.preventDefault(); // 防止 input 先 blur
                   add(tag);

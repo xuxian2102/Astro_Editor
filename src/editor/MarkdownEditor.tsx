@@ -1,22 +1,20 @@
-import { useEffect, useMemo, useRef } from "react";
-import { Compartment, EditorState } from "@codemirror/state";
-import {
-  EditorView,
-  drawSelection,
-  highlightActiveLine,
-  keymap,
-  placeholder,
-} from "@codemirror/view";
-import {
-  defaultKeymap,
-  history,
-  historyKeymap,
-} from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   defaultHighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
+import { Compartment, EditorState } from "@codemirror/state";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  keymap,
+  placeholder,
+} from "@codemirror/view";
+import { useEffect, useMemo, useRef } from "react";
+import i18n from "../i18n";
+import { api } from "../lib/tauriApi";
 import {
   cancelImageInsertionAnchor,
   createImageInsertionAnchor,
@@ -30,12 +28,7 @@ import {
   isPasteShortcut,
   needsNativeClipboardFallback,
 } from "./imagePaste";
-import { api } from "../lib/tauriApi";
-import i18n from "../i18n";
-import {
-  createLivePreviewExtension,
-  imageMimeType,
-} from "./livePreview";
+import { createLivePreviewExtension, imageMimeType } from "./livePreview";
 
 interface MarkdownEditorProps {
   /** 变化时整个重建编辑器状态（换文章 / 外部重载） */
@@ -97,10 +90,14 @@ export default function MarkdownEditor({
       }),
     [postId, projectGeneration],
   );
+  const configuredLivePreviewRef = useRef(configuredLivePreview);
+  configuredLivePreviewRef.current = configuredLivePreview;
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    // sessionKey 是编辑器实例的语义身份；即使正文相同，切换文章也必须重建状态。
+    container.dataset.sessionKey = sessionKey;
 
     // 部分 WebKitGTK 版本在图片 Ctrl+V 时连可用的 paste 事件都不给。keydown 先安排
     // 一个延迟兜底；正常 paste 一到就取消，因此标准图片和文本都不会重复处理。
@@ -133,7 +130,7 @@ export default function MarkdownEditor({
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         imageInsertionAnchorExtension,
         livePreviewCompartmentRef.current.of(
-          livePreviewEnabledRef.current ? configuredLivePreview : [],
+          livePreviewEnabledRef.current ? configuredLivePreviewRef.current : [],
         ),
         placeholder(i18n.t(($) => $.editor.placeholder)),
         keymap.of([
@@ -215,7 +212,8 @@ export default function MarkdownEditor({
 
             // WebKitGTK bug 218519：事件仍会派发，但图片 DataTransfer 可能完全为空。
             // 在 paste 事件里走原生兜底既支持 Ctrl/Cmd+V，也支持右键和应用菜单粘贴。
-            if (!needsNativeClipboardFallback(event.clipboardData)) return false;
+            if (!needsNativeClipboardFallback(event.clipboardData))
+              return false;
             const explicitlyImage = hasNativeImageClipboardHint(
               event.clipboardData,
             );

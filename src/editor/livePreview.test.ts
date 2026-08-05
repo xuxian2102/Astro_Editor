@@ -1,17 +1,13 @@
-import { describe, expect, it } from "vitest";
-import {
-  Compartment,
-  EditorSelection,
-  EditorState,
-} from "@codemirror/state";
 import { history, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import type { DecorationSet } from "@codemirror/view";
+import { describe, expect, it } from "vitest";
 import {
   buildLivePreviewDecorations,
   imageMimeType,
-  livePreviewExtension,
   type LivePreviewImageState,
+  livePreviewExtension,
   selectionIntersectsNode,
   taskToggleChange,
 } from "./livePreview";
@@ -135,9 +131,9 @@ describe("live preview decorations", () => {
     ).filter((item) => item.kind === "syntax");
 
     expect(strongHidden.some((item) => item.owner === "strong")).toBe(false);
-    expect(strongHidden.filter((item) => item.owner === "emphasis")).toHaveLength(
-      2,
-    );
+    expect(
+      strongHidden.filter((item) => item.owner === "emphasis"),
+    ).toHaveLength(2);
 
     const emphasisFrom = doc.indexOf("斜体");
     const emphasisState = createState(doc, emphasisFrom, emphasisFrom + 2);
@@ -177,9 +173,7 @@ describe("live preview decorations", () => {
     );
 
     expect(
-      visual.some(
-        (item) => item.kind === "syntax" && item.owner === "strong",
-      ),
+      visual.some((item) => item.kind === "syntax" && item.owner === "strong"),
     ).toBe(false);
     expect(
       visual.filter(
@@ -285,7 +279,7 @@ describe("live preview decorations", () => {
 
   it("renders inline and reference links as styled labels", () => {
     const doc =
-      "访问 [示例 **站点**](https://example.com \"标题\") 和 [参考][id]。\n\n[id]: /docs\n\n光标";
+      '访问 [示例 **站点**](https://example.com "标题") 和 [参考][id]。\n\n[id]: /docs\n\n光标';
     const state = createState(doc, doc.length);
     const visual = snapshots(build(state).decorations, state);
     const linkSyntax = visual.filter(
@@ -297,7 +291,7 @@ describe("live preview decorations", () => {
 
     expect(linkSyntax.map((item) => item.text)).toEqual([
       "[",
-      "](https://example.com \"标题\")",
+      '](https://example.com "标题")',
       "[",
       "][id]",
     ]);
@@ -319,14 +313,10 @@ describe("live preview decorations", () => {
     const visual = snapshots(build(state).decorations, state);
 
     expect(
-      visual.some(
-        (item) => item.kind === "syntax" && item.owner === "link",
-      ),
+      visual.some((item) => item.kind === "syntax" && item.owner === "link"),
     ).toBe(false);
     expect(
-      visual.some(
-        (item) => item.kind === "content" && item.owner === "link",
-      ),
+      visual.some((item) => item.kind === "content" && item.owner === "link"),
     ).toBe(true);
   });
 
@@ -360,10 +350,7 @@ describe("live preview decorations", () => {
       doc,
       doc.indexOf("https://example.com/docs") + 3,
     );
-    const activeVisual = snapshots(
-      build(activeState).decorations,
-      activeState,
-    );
+    const activeVisual = snapshots(build(activeState).decorations, activeState);
     expect(
       activeVisual.some(
         (item) => item.kind === "syntax" && item.owner === "autolink",
@@ -397,22 +384,17 @@ describe("live preview decorations", () => {
     expect(headingLines.map((item) => item.level)).toEqual([1, 2]);
     expect(hidden.map((item) => item.text)).toEqual(["===", "---"]);
     expect(collapsed).toHaveLength(2);
-    expect(
-      visual.some((item) => item.kind === "horizontal-rule"),
-    ).toBe(false);
+    expect(visual.some((item) => item.kind === "horizontal-rule")).toBe(false);
     expect(snapshots(result.atomicRanges, state)).toEqual(
       expect.arrayContaining(hidden),
     );
 
     const activeState = createState(doc, doc.indexOf("二级") + 1);
-    const activeVisual = snapshots(
-      build(activeState).decorations,
-      activeState,
-    );
+    const activeVisual = snapshots(build(activeState).decorations, activeState);
     expect(
-      activeVisual.filter(
-        (item) => item.kind === "syntax" && item.owner === "heading",
-      ).map((item) => item.text),
+      activeVisual
+        .filter((item) => item.kind === "syntax" && item.owner === "heading")
+        .map((item) => item.text),
     ).toEqual(["==="]);
     expect(
       activeVisual.filter(
@@ -495,7 +477,7 @@ describe("live preview decorations", () => {
   });
 
   it("replaces a local image node with a resolved widget and restores source on edit", () => {
-    const doc = "前 ![封面](post/cover.png \"题注\") 后，光标";
+    const doc = '前 ![封面](post/cover.png "题注") 后，光标';
     const readyImage = () => ({
       status: "ready" as const,
       src: "blob:test-image",
@@ -542,12 +524,10 @@ describe("live preview decorations", () => {
       "[链接](https://example.com) ![图](post/a.png)\n\n```ts\nx\n```\n\n尾";
     const state = createState(doc, doc.length);
     const visual = snapshots(
-      build(
-        state,
-        true,
-        [{ from: 0, to: state.doc.length }],
-        () => ({ status: "ready", src: "blob:test" }),
-      ).decorations,
+      build(state, true, [{ from: 0, to: state.doc.length }], () => ({
+        status: "ready",
+        src: "blob:test",
+      })).decorations,
       state,
     );
 
@@ -557,8 +537,7 @@ describe("live preview decorations", () => {
   });
 
   it("reveals an image only when IME composition started inside its source", () => {
-    const doc =
-      "![图](post/a.png)\n\n![保留](post/b.png)\n\n输入位置";
+    const doc = "![图](post/a.png)\n\n![保留](post/b.png)\n\n输入位置";
     const state = createState(doc, doc.length);
     const visual = snapshots(
       build(
@@ -629,9 +608,7 @@ describe("live preview decorations", () => {
     const doc = "- [ ] 待办\n- [X] 完成\n\n光标";
     const state = createState(doc, doc.length);
     const visual = snapshots(build(state).decorations, state);
-    const checkboxes = visual.filter(
-      (item) => item.kind === "task-checkbox",
-    );
+    const checkboxes = visual.filter((item) => item.kind === "task-checkbox");
     const taskText = visual.filter(
       (item) => item.kind === "content" && item.owner === "task",
     );
@@ -651,8 +628,7 @@ describe("live preview decorations", () => {
   });
 
   it("styles GFM tables, hides pipes, and collapses the separator row", () => {
-    const doc =
-      "| 名称 | 状态 |\n| --- | ---: |\n| 项目 | **完成** |\n\n光标";
+    const doc = "| 名称 | 状态 |\n| --- | ---: |\n| 项目 | **完成** |\n\n光标";
     const state = createState(doc, doc.length);
     const visual = snapshots(build(state).decorations, state);
     const tableLines = visual.filter(
@@ -713,9 +689,7 @@ describe("imageMimeType", () => {
       "image/png",
     );
     expect(imageMimeType("post/vector.svg")).toBe("image/svg+xml");
-    expect(imageMimeType("post/unknown.bin")).toBe(
-      "application/octet-stream",
-    );
+    expect(imageMimeType("post/unknown.bin")).toBe("application/octet-stream");
   });
 });
 

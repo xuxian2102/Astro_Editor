@@ -91,9 +91,9 @@ describe("project settings config", () => {
   it("规范化字段名并校验重复字段和默认值类型", () => {
     const draft = createProjectSettingsDraft(config());
     draft.fields[0].name = " title ";
-    expect(expectConfig(buildProjectConfig(draft, null)).frontmatter.fields[0].name).toBe(
-      "title",
-    );
+    expect(
+      expectConfig(buildProjectConfig(draft, null)).frontmatter.fields[0].name,
+    ).toBe("title");
 
     const duplicate = createProjectSettingsDraft(config());
     duplicate.fields[1].name = "title";

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type errorCodeManifest from "../../shared/error-codes.json";
 import i18n from "../i18n";
 
 export interface FieldSpec {
@@ -110,33 +111,8 @@ export type PreviewStatus =
       logTail: string;
     };
 
-export type AppErrorCode =
-    | "no_project"
-    | "invalid_project"
-    | "config"
-    | "invalid_post_id"
-    | "not_found"
-    | "already_exists"
-    | "external_modification_conflict"
-    | "stale_project_session"
-    | "io"
-    | "clipboard"
-    | "git"
-    | "preview"
-    | "git_unresolved_conflicts"
-    | "git_nothing_to_commit"
-    | "git_stage_failed"
-    | "git_commit_failed"
-    | "git_push_no_upstream"
-    | "git_push_authentication_failed"
-    | "git_push_failed"
-    | "git_push_failed_detail"
-    | "preview_port_in_use"
-    | "preview_spawn_failed"
-    | "preview_exited_early"
-    | "preview_startup_timeout"
-    | "preview_exited_unexpectedly"
-    | (string & {});
+export type KnownAppErrorCode = keyof typeof errorCodeManifest;
+export type AppErrorCode = KnownAppErrorCode | (string & {});
 
 export interface AppErrorPayload {
   code: AppErrorCode;
@@ -175,88 +151,75 @@ export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+type ErrorSelector = Parameters<typeof i18n.t>[0];
+type ErrorTranslator = (error: AppErrorPayload) => string | null;
+
+const errorTranslators = {
+  no_project: () => i18n.t(($) => $.backendErrors.noProject),
+  stale_project_session: () =>
+    i18n.t(($) => $.backendErrors.staleProjectSession),
+  invalid_project: (error) =>
+    translateDetail(error, ($) => $.backendErrors.invalidProject),
+  config: (error) => translateDetail(error, ($) => $.backendErrors.config),
+  invalid_post_id: (error) =>
+    translateParam(error, "id", ($) => $.backendErrors.invalidPostId),
+  not_found: (error) =>
+    translateParam(error, "id", ($) => $.backendErrors.notFound),
+  already_exists: (error) =>
+    translateParam(error, "target", ($) => $.backendErrors.alreadyExists),
+  external_modification_conflict: () =>
+    i18n.t(($) => $.backendErrors.externalModificationConflict),
+  io: (error) => translateDetail(error, ($) => $.backendErrors.io),
+  clipboard: (error) =>
+    translateDetail(error, ($) => $.backendErrors.clipboard),
+  git: (error) => translateDetail(error, ($) => $.backendErrors.git),
+  preview: (error) => translateDetail(error, ($) => $.backendErrors.preview),
+  git_unresolved_conflicts: (error) =>
+    translateParam(
+      error,
+      "paths",
+      ($) => $.backendErrors.gitUnresolvedConflicts,
+    ),
+  git_nothing_to_commit: () =>
+    i18n.t(($) => $.backendErrors.gitNothingToCommit),
+  git_stage_failed: (error) =>
+    translateDetail(error, ($) => $.backendErrors.gitStageFailed),
+  git_commit_failed: (error) =>
+    translateDetail(error, ($) => $.backendErrors.gitCommitFailed),
+  git_push_no_upstream: () => i18n.t(($) => $.backendErrors.gitPushNoUpstream),
+  git_push_authentication_failed: () =>
+    i18n.t(($) => $.backendErrors.gitPushAuthenticationFailed),
+  git_push_failed: () => i18n.t(($) => $.backendErrors.gitPushFailed),
+  git_push_failed_detail: (error) =>
+    translateDetail(error, ($) => $.backendErrors.gitPushFailedDetail),
+  preview_port_in_use: (error) =>
+    translateParam(error, "port", ($) => $.backendErrors.previewPortInUse),
+  preview_spawn_failed: (error) =>
+    translateDetail(error, ($) => $.backendErrors.previewSpawnFailed),
+  preview_exited_early: (error) =>
+    translateParam(error, "exit", ($) => $.backendErrors.previewExitedEarly),
+  preview_startup_timeout: (error) =>
+    translateParam(
+      error,
+      "seconds",
+      ($) => $.backendErrors.previewStartupTimeout,
+    ),
+  preview_exited_unexpectedly: (error) =>
+    translateParam(
+      error,
+      "exit",
+      ($) => $.backendErrors.previewExitedUnexpectedly,
+    ),
+} satisfies Record<KnownAppErrorCode, ErrorTranslator>;
+
 function translatedErrorMessage(error: AppErrorPayload): string | null {
-  switch (error.code) {
-    case "no_project":
-      return i18n.t(($) => $.backendErrors.noProject);
-    case "stale_project_session":
-      return i18n.t(($) => $.backendErrors.staleProjectSession);
-    case "invalid_project":
-      return translateDetail(error, ($) => $.backendErrors.invalidProject);
-    case "config":
-      return translateDetail(error, ($) => $.backendErrors.config);
-    case "invalid_post_id":
-      return translateParam(error, "id", ($) => $.backendErrors.invalidPostId);
-    case "not_found":
-      return translateParam(error, "id", ($) => $.backendErrors.notFound);
-    case "already_exists":
-      return translateParam(
-        error,
-        "target",
-        ($) => $.backendErrors.alreadyExists,
-      );
-    case "external_modification_conflict":
-      return i18n.t(($) => $.backendErrors.externalModificationConflict);
-    case "io":
-      return translateDetail(error, ($) => $.backendErrors.io);
-    case "clipboard":
-      return translateDetail(error, ($) => $.backendErrors.clipboard);
-    case "git":
-      return translateDetail(error, ($) => $.backendErrors.git);
-    case "preview":
-      return translateDetail(error, ($) => $.backendErrors.preview);
-    case "git_unresolved_conflicts":
-      return translateParam(
-        error,
-        "paths",
-        ($) => $.backendErrors.gitUnresolvedConflicts,
-      );
-    case "git_nothing_to_commit":
-      return i18n.t(($) => $.backendErrors.gitNothingToCommit);
-    case "git_stage_failed":
-      return translateDetail(error, ($) => $.backendErrors.gitStageFailed);
-    case "git_commit_failed":
-      return translateDetail(error, ($) => $.backendErrors.gitCommitFailed);
-    case "git_push_no_upstream":
-      return i18n.t(($) => $.backendErrors.gitPushNoUpstream);
-    case "git_push_authentication_failed":
-      return i18n.t(($) => $.backendErrors.gitPushAuthenticationFailed);
-    case "git_push_failed":
-      return i18n.t(($) => $.backendErrors.gitPushFailed);
-    case "git_push_failed_detail":
-      return translateDetail(error, ($) => $.backendErrors.gitPushFailedDetail);
-    case "preview_port_in_use":
-      return translateParam(
-        error,
-        "port",
-        ($) => $.backendErrors.previewPortInUse,
-      );
-    case "preview_spawn_failed":
-      return translateDetail(error, ($) => $.backendErrors.previewSpawnFailed);
-    case "preview_exited_early":
-      return translateParam(
-        error,
-        "exit",
-        ($) => $.backendErrors.previewExitedEarly,
-      );
-    case "preview_startup_timeout":
-      return translateParam(
-        error,
-        "seconds",
-        ($) => $.backendErrors.previewStartupTimeout,
-      );
-    case "preview_exited_unexpectedly":
-      return translateParam(
-        error,
-        "exit",
-        ($) => $.backendErrors.previewExitedUnexpectedly,
-      );
-    default:
-      return null;
-  }
+  if (!isKnownAppErrorCode(error.code)) return null;
+  return errorTranslators[error.code](error);
 }
 
-type ErrorSelector = Parameters<typeof i18n.t>[0];
+function isKnownAppErrorCode(code: AppErrorCode): code is KnownAppErrorCode {
+  return Object.hasOwn(errorTranslators, code);
+}
 
 function translateDetail(
   error: AppErrorPayload,

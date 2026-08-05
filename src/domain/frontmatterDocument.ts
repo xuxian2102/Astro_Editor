@@ -27,9 +27,7 @@ export class FrontmatterDocument {
   isEmpty(): boolean {
     const contents = this.doc.contents as { items?: unknown[] } | null;
     return (
-      !contents ||
-      !Array.isArray(contents.items) ||
-      contents.items.length === 0
+      !contents || !Array.isArray(contents.items) || contents.items.length === 0
     );
   }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PostSummary, ProjectInfo } from "../lib/tauriApi";
 
@@ -28,6 +28,18 @@ export default function Sidebar({
   const [newName, setNewName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const createInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (creating) createInputRef.current?.focus();
+  }, [creating]);
+
+  useEffect(() => {
+    if (!renamingId) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [renamingId]);
 
   const projectName = project ? basename(project.root) : null;
 
@@ -35,9 +47,15 @@ export default function Sidebar({
     <aside className="sidebar">
       <div className="sidebar-header">
         <button type="button" onClick={onOpenProject}>
-          {projectName ? t(($) => $.sidebar.switchProject) : t(($) => $.sidebar.openProject)}
+          {projectName
+            ? t(($) => $.sidebar.switchProject)
+            : t(($) => $.sidebar.openProject)}
         </button>
-        {projectName && <span className="project-name" title={project?.root}>{projectName}</span>}
+        {projectName && (
+          <span className="project-name" title={project?.root}>
+            {projectName}
+          </span>
+        )}
       </div>
 
       {project && (
@@ -45,7 +63,7 @@ export default function Sidebar({
           <div className="sidebar-actions">
             {creating ? (
               <input
-                autoFocus
+                ref={createInputRef}
                 className="inline-input"
                 value={newName}
                 placeholder={t(($) => $.sidebar.fileNamePlaceholder)}
@@ -74,7 +92,7 @@ export default function Sidebar({
               <li key={post.id}>
                 {renamingId === post.id ? (
                   <input
-                    autoFocus
+                    ref={renameInputRef}
                     className="inline-input"
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
@@ -108,7 +126,9 @@ export default function Sidebar({
                           type="button"
                           className="post-rename"
                           title={t(($) => $.sidebar.rename)}
-                          aria-label={t(($) => $.sidebar.renamePost, { id: post.id })}
+                          aria-label={t(($) => $.sidebar.renamePost, {
+                            id: post.id,
+                          })}
                           onClick={() => {
                             setRenamingId(post.id);
                             setRenameValue(post.id);
@@ -120,7 +140,9 @@ export default function Sidebar({
                           type="button"
                           className="post-delete"
                           title={t(($) => $.sidebar.moveToTrash)}
-                          aria-label={t(($) => $.sidebar.deletePost, { id: post.id })}
+                          aria-label={t(($) => $.sidebar.deletePost, {
+                            id: post.id,
+                          })}
                           onClick={() => onDeletePost(post.id)}
                         >
                           🗑

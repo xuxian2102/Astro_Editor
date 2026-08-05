@@ -1,7 +1,8 @@
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import type { FieldSpec } from "../lib/tauriApi";
-import type { PostSession } from "../domain/postSession";
 import type { FrontmatterDocument } from "../domain/frontmatterDocument";
+import type { PostSession } from "../domain/postSession";
+import type { FieldSpec } from "../lib/tauriApi";
 import TagEditor from "./TagEditor";
 
 interface FrontmatterFormProps {
@@ -22,6 +23,7 @@ export default function FrontmatterForm({
   tagSuggestions,
 }: FrontmatterFormProps) {
   const { t } = useTranslation();
+  const formId = useId();
   const fm = session.fmDoc;
 
   if (!fm) {
@@ -37,17 +39,20 @@ export default function FrontmatterForm({
 
   return (
     <div className="fm-form">
-      {fields.map((field) => (
-        <label key={field.name} className="fm-field">
-          <span className="fm-label">
-            {field.name}
-            {field.required && fm.getString(field.name) === "" && (
-              <em className="fm-required">{t(($) => $.common.required)}</em>
-            )}
-          </span>
-          {renderControl(field, fm, onEdit, tagSuggestions)}
-        </label>
-      ))}
+      {fields.map((field, index) => {
+        const controlId = `${formId}-field-${index}`;
+        return (
+          <div key={field.name} className="fm-field">
+            <label htmlFor={controlId} className="fm-label">
+              {field.name}
+              {field.required && fm.getString(field.name) === "" && (
+                <em className="fm-required">{t(($) => $.common.required)}</em>
+              )}
+            </label>
+            {renderControl(field, controlId, fm, onEdit, tagSuggestions)}
+          </div>
+        );
+      })}
       {fields.length === 0 && (
         <p className="fm-hint">{t(($) => $.frontmatter.noConfiguredFields)}</p>
       )}
@@ -58,6 +63,7 @@ export default function FrontmatterForm({
 
 function renderControl(
   field: FieldSpec,
+  controlId: string,
   fm: FrontmatterDocument,
   onEdit: FrontmatterFormProps["onEdit"],
   tagSuggestions: Record<string, string[]>,
@@ -66,6 +72,7 @@ function renderControl(
     case "boolean":
       return (
         <input
+          id={controlId}
           type="checkbox"
           checked={fm.getBoolean(field.name)}
           onChange={(e) => onEdit((d) => d.set(field.name, e.target.checked))}
@@ -74,6 +81,7 @@ function renderControl(
     case "date":
       return (
         <input
+          id={controlId}
           type="date"
           value={fm.getString(field.name)}
           onChange={(e) => onEdit((d) => d.set(field.name, e.target.value))}
@@ -82,6 +90,7 @@ function renderControl(
     case "tags":
       return (
         <TagEditor
+          inputId={controlId}
           value={fm.getTags(field.name)}
           onChange={(tags) => onEdit((d) => d.set(field.name, tags))}
           suggestions={tagSuggestions[field.name] ?? []}
@@ -90,6 +99,7 @@ function renderControl(
     default:
       return (
         <input
+          id={controlId}
           type="text"
           value={fm.getString(field.name)}
           onChange={(e) => onEdit((d) => d.set(field.name, e.target.value))}

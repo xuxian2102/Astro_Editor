@@ -95,6 +95,9 @@ jobs:
       - name: Test frontend
         run: pnpm test
 
+      - name: Lint and format-check frontend
+        run: pnpm check
+
       - name: Build frontend
         run: pnpm build
 

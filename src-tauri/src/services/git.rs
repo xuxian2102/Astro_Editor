@@ -4,7 +4,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::error::{AppError, ErrorPayload};
+use crate::error::{code, AppError, ErrorPayload};
 use crate::model::{ChangeKind, FileChange, GitStatus, ProjectContext, PublishResult};
 
 const MAX_GIT_STREAM_BYTES: usize = 16 * 1024 * 1024;
@@ -312,7 +312,7 @@ fn current_commit_hash(root: &Path) -> Option<String> {
 fn classify_push_error(stderr: &str) -> ErrorPayload {
     if stderr.contains("has no upstream branch") {
         ErrorPayload::new(
-            "git_push_no_upstream",
+            code::GIT_PUSH_NO_UPSTREAM,
             "当前分支没有配置上游分支，请先在终端执行一次 git push -u <remote> <分支名>",
         )
     } else if stderr.contains("Authentication failed")
@@ -320,15 +320,15 @@ fn classify_push_error(stderr: &str) -> ErrorPayload {
         || stderr.contains("Permission denied (publickey)")
     {
         ErrorPayload::new(
-            "git_push_authentication_failed",
+            code::GIT_PUSH_AUTHENTICATION_FAILED,
             "推送失败（认证问题）：请检查 git 凭证或 SSH key 配置",
         )
     } else {
         let trimmed = stderr.trim();
         if trimmed.is_empty() {
-            ErrorPayload::new("git_push_failed", "推送失败")
+            ErrorPayload::new(code::GIT_PUSH_FAILED, "推送失败")
         } else {
-            ErrorPayload::new("git_push_failed_detail", format!("推送失败：{trimmed}"))
+            ErrorPayload::new(code::GIT_PUSH_FAILED_DETAIL, format!("推送失败：{trimmed}"))
                 .with_param("detail", trimmed.to_owned())
         }
     }
@@ -357,7 +357,7 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             error_stage: Some("stage".into()),
             error: Some(
                 ErrorPayload::new(
-                    "git_unresolved_conflicts",
+                    code::GIT_UNRESOLVED_CONFLICTS,
                     format!("存在未解决的 Git 冲突，发布已中止：{paths}"),
                 )
                 .with_param("paths", paths),
@@ -388,7 +388,7 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             pushed: false,
             error_stage: Some("stage".into()),
             error: Some(ErrorPayload::new(
-                "git_nothing_to_commit",
+                code::GIT_NOTHING_TO_COMMIT,
                 "没有可提交的改动",
             )),
         });
@@ -407,7 +407,7 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             pushed: false,
             error_stage: Some("stage".into()),
             error: Some(
-                ErrorPayload::new("git_stage_failed", format!("暂存失败：{detail}"))
+                ErrorPayload::new(code::GIT_STAGE_FAILED, format!("暂存失败：{detail}"))
                     .with_param("detail", detail),
             ),
         });
@@ -426,7 +426,7 @@ pub fn publish(ctx: &ProjectContext, message: &str, push: bool) -> Result<Publis
             pushed: false,
             error_stage: Some("commit".into()),
             error: Some(
-                ErrorPayload::new("git_commit_failed", format!("提交失败：{detail}"))
+                ErrorPayload::new(code::GIT_COMMIT_FAILED, format!("提交失败：{detail}"))
                     .with_param("detail", detail),
             ),
         });

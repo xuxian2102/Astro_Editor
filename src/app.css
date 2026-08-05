@@ -317,7 +317,8 @@ input[readonly] {
 }
 
 .editor-host .cm-line.cm-live-heading {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-weight: 700;
   line-height: 1.35;
   padding-top: 0.28em;
@@ -426,7 +427,8 @@ input[readonly] {
 
 .editor-host .cm-live-code-language {
   color: var(--fg-muted);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -459,7 +461,8 @@ input[readonly] {
 .editor-host .cm-live-image-error {
   padding: 8px 12px;
   color: var(--fg-muted);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 12px;
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const marker = "E2E-WEBKITGTK-SMOKE";
@@ -8,10 +8,7 @@ const arrowUp = "\uE013";
 const control = "\uE009";
 const enter = "\uE007";
 const workspaceRoot = resolve(import.meta.dirname, "../../..");
-const clipboardFixture = join(
-  workspaceRoot,
-  "src-tauri/icons/32x32.png",
-);
+const clipboardFixture = join(workspaceRoot, "src-tauri/icons/32x32.png");
 
 function copyWaylandImage(bytes) {
   const { DISPLAY: _display, ...waylandEnvironment } = process.env;
@@ -41,10 +38,11 @@ function copyWaylandImage(bytes) {
 
 async function waitForDom(description, check) {
   try {
-    await browser.waitUntil(
-      async () => Boolean(await browser.execute(check)),
-      { timeout: 10_000, interval: 50, timeoutMsg: description },
-    );
+    await browser.waitUntil(async () => Boolean(await browser.execute(check)), {
+      timeout: 10_000,
+      interval: 50,
+      timeoutMsg: description,
+    });
   } catch (error) {
     const snapshot = await browser.execute(() => ({
       href: window.location.href,
@@ -75,22 +73,74 @@ describe("WebKitGTK editor smoke", () => {
     // Tauri 插件做自动聚焦；后续仍由嵌入式 WebDriver 驱动当前 WebKitGTK。
     const windowHandle = await browser.getWindowHandle();
     await browser.switchToWindow(windowHandle);
+    await browser.execute(() => {
+      window.__blogEditorE2eCspViolations = [];
+      document.addEventListener("securitypolicyviolation", (event) => {
+        window.__blogEditorE2eCspViolations.push({
+          blockedUri: event.blockedURI,
+          directive: event.effectiveDirective,
+        });
+      });
+    });
 
     await waitForDom(
       "隔离项目没有在 WebKitGTK 中自动打开",
       () => document.querySelector(".project-name") !== null,
     );
 
+    const settingsOpened = await browser.execute(() => {
+      const trigger = document.querySelector('button[aria-haspopup="dialog"]');
+      if (!(trigger instanceof HTMLElement)) return false;
+      trigger.focus();
+      trigger.click();
+      return true;
+    });
+    assert.equal(settingsOpened, true, "找不到项目设置按钮");
+    await waitForDom(
+      "项目设置没有把初始焦点移入标题",
+      () => document.activeElement?.id === "project-settings-title",
+    );
+    const settingsAccessibility = await browser.execute(() => {
+      const dialog = document.querySelector(".settings-modal");
+      if (!(dialog instanceof HTMLElement)) return null;
+      const titleId = dialog.getAttribute("aria-labelledby");
+      const descriptionIds =
+        dialog.getAttribute("aria-describedby")?.split(/\s+/) ?? [];
+      return {
+        modal: dialog.getAttribute("aria-modal"),
+        titleExists: Boolean(titleId && document.getElementById(titleId)),
+        descriptionsExist: descriptionIds.every((id) =>
+          Boolean(document.getElementById(id)),
+        ),
+      };
+    });
+    assert.deepEqual(settingsAccessibility, {
+      modal: "true",
+      titleExists: true,
+      descriptionsExist: true,
+    });
+    await browser.execute(() => {
+      document
+        .querySelector(".settings-modal")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    await waitForDom(
+      "Escape 没有关闭项目设置并把焦点还给触发按钮",
+      () =>
+        document.querySelector(".settings-modal") === null &&
+        document.activeElement?.getAttribute("aria-haspopup") === "dialog",
+    );
+
     await click(".sidebar-actions button");
     const createInput = await $(".sidebar-actions .inline-input");
     await createInput.setValue("hello-astro.md");
     await browser.keys(enter);
-    await waitForDom(
-      "结构化 Rust 错误没有经前端文案目录显示",
-      () =>
-        document
-          .querySelector(".error-banner")
-          ?.textContent?.includes("目标已存在：hello-astro.md"),
+    await waitForDom("结构化 Rust 错误没有经前端文案目录显示", () =>
+      document
+        .querySelector(".error-banner")
+        ?.textContent?.includes("目标已存在：hello-astro.md"),
     );
     await click(".error-banner button");
 
@@ -104,13 +154,69 @@ describe("WebKitGTK editor smoke", () => {
     });
     assert.equal(opened, true, "文章列表里缺少 hello-astro.md");
 
-    await waitForDom(
-      "文章没有在 WebKitGTK 中打开",
-      () => document.querySelector(".doc-title")?.textContent?.includes("hello-astro.md"),
+    await waitForDom("文章没有在 WebKitGTK 中打开", () =>
+      document
+        .querySelector(".doc-title")
+        ?.textContent?.includes("hello-astro.md"),
     );
     await waitForDom(
       "CodeMirror 没有挂载",
       () => document.querySelector(".editor-host .cm-editor") !== null,
+    );
+
+    const deleteDialogOpened = await browser.execute(() => {
+      const trigger = document.querySelector("button.post-delete");
+      if (!(trigger instanceof HTMLElement)) return false;
+      trigger.focus();
+      trigger.click();
+      return true;
+    });
+    assert.equal(deleteDialogOpened, true, "找不到文章删除按钮");
+    await waitForDom(
+      "删除确认框没有把焦点移到取消按钮",
+      () =>
+        document.activeElement ===
+        document.querySelector(".modal-actions button:first-child"),
+    );
+    const modalAccessibility = await browser.execute(() => {
+      const dialog = document.querySelector(".modal");
+      if (!(dialog instanceof HTMLElement)) return null;
+      const titleId = dialog.getAttribute("aria-labelledby");
+      const messageId = dialog.getAttribute("aria-describedby");
+      dialog.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Tab",
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+      return {
+        modal: dialog.getAttribute("aria-modal"),
+        titleExists: Boolean(titleId && document.getElementById(titleId)),
+        messageExists: Boolean(messageId && document.getElementById(messageId)),
+        wrappedBackward:
+          document.activeElement ===
+          document.querySelector(".modal-actions button:last-child"),
+      };
+    });
+    assert.deepEqual(modalAccessibility, {
+      modal: "true",
+      titleExists: true,
+      messageExists: true,
+      wrappedBackward: true,
+    });
+    await browser.execute(() => {
+      document
+        .querySelector(".modal")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    await waitForDom(
+      "Escape 没有关闭删除确认框并恢复触发按钮焦点",
+      () =>
+        document.querySelector(".modal") === null &&
+        document.activeElement?.classList.contains("post-delete"),
     );
     await waitForDom(
       "ATX 标题实时装饰没有渲染",
@@ -121,8 +227,10 @@ describe("WebKitGTK editor smoke", () => {
       () => document.querySelector(".cm-live-code-language") !== null,
     );
 
-    const modeInitiallyEnabled = await browser.execute(
-      () => document.querySelector("button.editor-mode-toggle")?.getAttribute("aria-pressed"),
+    const modeInitiallyEnabled = await browser.execute(() =>
+      document
+        .querySelector("button.editor-mode-toggle")
+        ?.getAttribute("aria-pressed"),
     );
     assert.equal(modeInitiallyEnabled, "true");
     await click("button.editor-mode-toggle");
@@ -160,14 +268,17 @@ describe("WebKitGTK editor smoke", () => {
     assert.equal(focused, true, "CodeMirror 无法获得键盘焦点");
     const editorElement = await $(".cm-content");
     await editorElement.addValue(`\n\n~~${marker}~~`);
-    await waitForDom(
-      "真实键盘输入没有进入 CodeMirror",
-      () => document.querySelector(".cm-content")?.textContent?.includes("E2E-WEBKITGTK-SMOKE"),
+    await waitForDom("真实键盘输入没有进入 CodeMirror", () =>
+      document
+        .querySelector(".cm-content")
+        ?.textContent?.includes("E2E-WEBKITGTK-SMOKE"),
     );
     await browser.keys(Array.from({ length: 20 }, () => arrowUp));
     await waitForDom(
       "删除线装饰没有在光标离开后生成",
-      () => document.querySelector(".cm-live-strikethrough")?.textContent === "E2E-WEBKITGTK-SMOKE",
+      () =>
+        document.querySelector(".cm-live-strikethrough")?.textContent ===
+        "E2E-WEBKITGTK-SMOKE",
     );
     await waitForDom(
       "编辑后没有进入 dirty 状态",
@@ -272,7 +383,11 @@ describe("WebKitGTK editor smoke", () => {
       );
       return true;
     });
-    assert.equal(compositionStarted, true, "无法触发 WebKitGTK compositionstart");
+    assert.equal(
+      compositionStarted,
+      true,
+      "无法触发 WebKitGTK compositionstart",
+    );
     await waitForDom(
       "在其他文本位置开始中文输入时，已渲染图片错误地退回 Markdown 源码",
       () => document.querySelector(".cm-live-image-ready img") !== null,
@@ -286,5 +401,10 @@ describe("WebKitGTK editor smoke", () => {
         }),
       );
     });
+
+    const cspViolations = await browser.execute(
+      () => window.__blogEditorE2eCspViolations,
+    );
+    assert.deepEqual(cspViolations, [], "生产 CSP 阻断了编辑器需要的资源");
   });
 });

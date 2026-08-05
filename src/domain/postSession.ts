@@ -70,11 +70,7 @@ export function sessionFromDraft(
   editorEpoch = 0,
   projectGeneration = 0,
 ): PostSession {
-  const session = sessionFromDocument(
-    document,
-    editorEpoch,
-    projectGeneration,
-  );
+  const session = sessionFromDocument(document, editorEpoch, projectGeneration);
   const fmChanged = draft.rawFrontmatter !== document.rawFrontmatter;
   const bodyChanged = draft.body !== document.body;
   return {

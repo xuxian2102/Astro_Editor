@@ -6,8 +6,8 @@ import {
   draftMatchesDocument,
   editorSessionKey,
   isDirty,
-  sessionFromDraft,
   sessionFromDocument,
+  sessionFromDraft,
 } from "./postSession";
 
 const document: PostDocument = {
@@ -63,7 +63,8 @@ describe("PostSession 保存合并", () => {
 
   it("保存期间继续编辑 frontmatter 时不共享旧 YAML 对象，也不误清 dirty", () => {
     const opened = sessionFromDocument(document, 1);
-    const firstFm = opened.fmDoc!.clone();
+    if (!opened.fmDoc) throw new Error("fixture must contain frontmatter");
+    const firstFm = opened.fmDoc.clone();
     firstFm.set("title", "First");
     const saving = {
       ...opened,
@@ -73,14 +74,14 @@ describe("PostSession 保存合并", () => {
     };
     const snapshot = createSaveSnapshot(saving);
 
-    const currentFm = saving.fmDoc!.clone();
+    const currentFm = saving.fmDoc.clone();
     currentFm.set("title", "Second");
     const current = { ...saving, fmDoc: currentFm, editVersion: 2 };
     const merged = afterSave(current, snapshot, "revision-2");
 
     expect(snapshot.rawFrontmatter).toContain("First");
     expect(snapshot.rawFrontmatter).not.toContain("Second");
-    expect(merged.fmDoc!.getString("title")).toBe("Second");
+    expect(merged.fmDoc?.getString("title")).toBe("Second");
     expect(merged.fmDirty).toBe(true);
     expect(merged.rawFrontmatter).toBe(snapshot.rawFrontmatter);
   });

@@ -1,28 +1,24 @@
-import {
-  StateEffect,
-  type EditorState,
-  type Range,
-} from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
+import { type EditorState, type Range, StateEffect } from "@codemirror/state";
 import {
   Decoration,
+  type DecorationSet,
   EditorView,
   ViewPlugin,
-  type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
+import i18n from "../i18n";
 import { decorateStructuralNode } from "./livePreviewStructural";
 import {
   CodeLanguageWidget,
   HorizontalRuleWidget,
-  MarkdownImageWidget,
   type LivePreviewImageState,
   type MarkdownImageDescriptor,
+  MarkdownImageWidget,
 } from "./livePreviewWidgets";
-import i18n from "../i18n";
 
-export { taskToggleChange } from "./livePreviewWidgets";
 export type { LivePreviewImageState } from "./livePreviewWidgets";
+export { taskToggleChange } from "./livePreviewWidgets";
 
 type SyntaxNode = ReturnType<typeof syntaxTree>["topNode"];
 type VisibleRange = { from: number; to: number };
@@ -37,10 +33,7 @@ type PreviewOwner =
   | "fenced-code"
   | "image"
   | "horizontal-rule";
-type HiddenSyntaxOwner = Exclude<
-  PreviewOwner,
-  "image" | "horizontal-rule"
->;
+type HiddenSyntaxOwner = Exclude<PreviewOwner, "image" | "horizontal-rule">;
 
 export interface LivePreviewConfig {
   /** 本地相对图片由宿主按项目安全边界读取；远程/data URL 由插件直接交给 img。 */
@@ -297,13 +290,7 @@ function addDelimitedNode(
   }
 
   if (!editingIntersectsNode(options, node.from, node.to)) {
-    addHiddenMarkers(
-      owner,
-      markers,
-      options.state,
-      visualRanges,
-      atomicRanges,
-    );
+    addHiddenMarkers(owner, markers, options.state, visualRanges, atomicRanges);
   }
 }
 
@@ -396,9 +383,7 @@ function addBareUrlNode(
   visualRanges: Range<Decoration>[],
 ) {
   // URL 也用于普通链接、图片与引用定义的目标；这些已有各自的渲染规则。
-  if (
-    hasAncestorNamed(node, ["Link", "Image", "Autolink", "LinkReference"])
-  ) {
+  if (hasAncestorNamed(node, ["Link", "Image", "Autolink", "LinkReference"])) {
     return;
   }
   const target = options.state.sliceDoc(node.from, node.to);
@@ -536,11 +521,9 @@ function stripLinkTitle(value: string): string {
   if (value.length < 2) return value;
   const first = value[0];
   const last = value[value.length - 1];
-  return (
-    (first === '"' && last === '"') ||
+  return (first === '"' && last === '"') ||
     (first === "'" && last === "'") ||
     (first === "(" && last === ")")
-  )
     ? value.slice(1, -1)
     : value;
 }
@@ -556,9 +539,7 @@ function imageDescriptor(
   return {
     target: state.sliceDoc(url.from, url.to),
     alt: state.sliceDoc(markers[0].to, markers[1].from),
-    title: title
-      ? stripLinkTitle(state.sliceDoc(title.from, title.to))
-      : null,
+    title: title ? stripLinkTitle(state.sliceDoc(title.from, title.to)) : null,
   };
 }
 
@@ -596,9 +577,7 @@ function addImageNode(
 }
 
 export function imageMimeType(markdownPath: string): string {
-  const withoutSuffix = markdownPath
-    .split(/[?#]/, 1)[0]
-    .replace(/^<|>$/g, "");
+  const withoutSuffix = markdownPath.split(/[?#]/, 1)[0].replace(/^<|>$/g, "");
   let decoded = withoutSuffix;
   try {
     decoded = decodeURIComponent(withoutSuffix);
@@ -684,14 +663,7 @@ export function buildLivePreviewDecorations(
           return;
         }
 
-        if (
-          decorateStructuralNode(
-            node,
-            options,
-            visualRanges,
-            atomicRanges,
-          )
-        ) {
+        if (decorateStructuralNode(node, options, visualRanges, atomicRanges)) {
           return;
         }
 
@@ -758,12 +730,7 @@ export function buildLivePreviewDecorations(
             }
             break;
           case "HorizontalRule":
-            addHorizontalRuleNode(
-              node,
-              options,
-              visualRanges,
-              atomicRanges,
-            );
+            addHorizontalRuleNode(node, options, visualRanges, atomicRanges);
             break;
         }
       },
@@ -907,7 +874,8 @@ class LivePreviewPluginValue {
       this.imageCache.set(markdownPath, cached);
       return cached;
     }
-    if (!this.config.loadImage) {
+    const loadImage = this.config.loadImage;
+    if (!loadImage) {
       return {
         status: "error",
         message: i18n.t(($) => $.editor.livePreview.noImageReader),
@@ -917,7 +885,7 @@ class LivePreviewPluginValue {
     const loading = { status: "loading" } as const;
     this.cacheImage(markdownPath, loading);
     void Promise.resolve()
-      .then(() => this.config.loadImage!(markdownPath))
+      .then(() => loadImage(markdownPath))
       .then((blob) => {
         if (this.destroyed) return;
         const src = URL.createObjectURL(blob);
@@ -971,37 +939,32 @@ class LivePreviewPluginValue {
   }
 }
 
-const livePreviewPlugin = ViewPlugin.fromClass(
-  LivePreviewPluginValue,
-  {
-    decorations: (plugin) => plugin.decorations,
-    provide: (plugin) =>
-      EditorView.atomicRanges.of(
-        (view) => view.plugin(plugin)?.atomicRanges ?? Decoration.none,
-      ),
-    eventObservers: {
-      compositionstart(_event, view) {
-        view.dispatch({ effects: setCompositionActive.of(true) });
-      },
-      compositionend(_event, view) {
-        // WebKit/部分 Linux 输入法会在 compositionend 后才提交最后一批 DOM mutation。
-        // 延迟到下一帧，并确认没有开启新的 composition，再恢复 replacement 装饰。
-        const releaseComposition = () => {
-          if (!view.compositionStarted && view.dom.isConnected) {
-            view.dispatch({ effects: setCompositionActive.of(false) });
-          }
-        };
-        const ownerWindow = view.dom.ownerDocument.defaultView;
-        if (ownerWindow) ownerWindow.requestAnimationFrame(releaseComposition);
-        else queueMicrotask(releaseComposition);
-      },
+const livePreviewPlugin = ViewPlugin.fromClass(LivePreviewPluginValue, {
+  decorations: (plugin) => plugin.decorations,
+  provide: (plugin) =>
+    EditorView.atomicRanges.of(
+      (view) => view.plugin(plugin)?.atomicRanges ?? Decoration.none,
+    ),
+  eventObservers: {
+    compositionstart(_event, view) {
+      view.dispatch({ effects: setCompositionActive.of(true) });
+    },
+    compositionend(_event, view) {
+      // WebKit/部分 Linux 输入法会在 compositionend 后才提交最后一批 DOM mutation。
+      // 延迟到下一帧，并确认没有开启新的 composition，再恢复 replacement 装饰。
+      const releaseComposition = () => {
+        if (!view.compositionStarted && view.dom.isConnected) {
+          view.dispatch({ effects: setCompositionActive.of(false) });
+        }
+      };
+      const ownerWindow = view.dom.ownerDocument.defaultView;
+      if (ownerWindow) ownerWindow.requestAnimationFrame(releaseComposition);
+      else queueMicrotask(releaseComposition);
     },
   },
-);
+});
 
-export function createLivePreviewExtension(
-  config: LivePreviewConfig = {},
-) {
+export function createLivePreviewExtension(config: LivePreviewConfig = {}) {
   return livePreviewPlugin.of(config);
 }
 

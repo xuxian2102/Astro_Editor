@@ -1,38 +1,38 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  api,
-  errorMessage,
-  isAppError,
-  type DraftDocument,
-  type FieldSpec,
-  type GitStatus,
-  type PostDocument,
-  type PostSummary,
-  type ProjectConfig,
-  type ProjectInfo,
-  type PublishResult,
-} from "./lib/tauriApi";
+import FrontmatterForm from "./components/FrontmatterForm";
+import GitPanel from "./components/GitPanel";
+import Modal from "./components/Modal";
+import PreviewController from "./components/PreviewController";
+import ProjectSettingsDialog from "./components/ProjectSettingsDialog";
+import Sidebar from "./components/Sidebar";
+import { FrontmatterDocument } from "./domain/frontmatterDocument";
 import {
   afterSave,
   createSaveSnapshot,
   draftMatchesDocument,
   editorSessionKey,
   isDirty,
-  sessionFromDraft,
-  sessionFromDocument,
   type PostSaveSnapshot,
   type PostSession,
+  sessionFromDocument,
+  sessionFromDraft,
 } from "./domain/postSession";
-import { FrontmatterDocument } from "./domain/frontmatterDocument";
 import MarkdownEditor from "./editor/MarkdownEditor";
-import Sidebar from "./components/Sidebar";
-import FrontmatterForm from "./components/FrontmatterForm";
-import GitPanel from "./components/GitPanel";
-import PreviewController from "./components/PreviewController";
-import Modal from "./components/Modal";
-import ProjectSettingsDialog from "./components/ProjectSettingsDialog";
+import {
+  api,
+  type DraftDocument,
+  errorMessage,
+  type FieldSpec,
+  type GitStatus,
+  isAppError,
+  type PostDocument,
+  type PostSummary,
+  type ProjectConfig,
+  type ProjectInfo,
+  type PublishResult,
+} from "./lib/tauriApi";
 
 type ModalState =
   | { kind: "conflict" }
@@ -98,8 +98,12 @@ export default function App() {
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [gitStatusError, setGitStatusError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
-  const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
-  const [tagSuggestions, setTagSuggestions] = useState<Record<string, string[]>>({});
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(
+    null,
+  );
+  const [tagSuggestions, setTagSuggestions] = useState<
+    Record<string, string[]>
+  >({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -123,22 +127,15 @@ export default function App() {
     return result;
   }, []);
 
-  const waitForDraftQueue = useCallback(
-    () => draftQueueRef.current,
-    [],
-  );
+  const waitForDraftQueue = useCallback(() => draftQueueRef.current, []);
 
   const loadSession = useCallback(
     async (document: PostDocument, recoverDraft = true) => {
       editorEpochRef.current += 1;
       const editorEpoch = editorEpochRef.current;
       const projectGeneration = projectRef.current?.generation ?? 0;
-      setModal((current) =>
-        current?.kind === "recovery" ? null : current,
-      );
-      setSession(
-        sessionFromDocument(document, editorEpoch, projectGeneration),
-      );
+      setModal((current) => (current?.kind === "recovery" ? null : current));
+      setSession(sessionFromDocument(document, editorEpoch, projectGeneration));
 
       if (!recoverDraft || projectGeneration === 0) return;
       try {
@@ -162,14 +159,15 @@ export default function App() {
           );
           return;
         }
-        setModal((currentModal) =>
-          currentModal ?? {
-            kind: "recovery",
-            document,
-            draft,
-            editorEpoch,
-            projectGeneration,
-          },
+        setModal(
+          (currentModal) =>
+            currentModal ?? {
+              kind: "recovery",
+              document,
+              draft,
+              editorEpoch,
+              projectGeneration,
+            },
         );
       } catch (e) {
         if (isAppError(e) && e.code === "stale_project_session") return;
@@ -334,7 +332,7 @@ export default function App() {
         }
       })
       .catch(() => {});
-  }, [refreshPosts, refreshGitStatus, refreshTags]);
+  }, [refreshPosts, refreshGitStatus, refreshTags, setProject]);
 
   const run = useCallback(async (action: () => Promise<void>) => {
     setError(null);
@@ -371,10 +369,7 @@ export default function App() {
           current?.projectGeneration ?? projectRef.current?.generation;
         if (projectGeneration === undefined) return;
         if (current && current.id !== id) {
-          await api.discardPendingImages(
-            current.projectGeneration,
-            current.id,
-          );
+          await api.discardPendingImages(current.projectGeneration, current.id);
         }
         const document = await api.readPost(projectGeneration, id);
         if (
@@ -389,9 +384,7 @@ export default function App() {
   );
 
   /** 有未保存改动时先经确认弹窗 */
-  const guardDirty = (
-    next: (fresh?: PostDocument) => void | Promise<void>,
-  ) => {
+  const guardDirty = (next: (fresh?: PostDocument) => void | Promise<void>) => {
     if (
       session &&
       (isDirty(session) || pendingImageOperationsRef.current.size > 0)
@@ -443,61 +436,61 @@ export default function App() {
     ],
   );
 
-  const requestSave = useCallback((requireClean: boolean): Promise<boolean> => {
-    saveRequestRef.current += 1;
-    if (requireClean) saveRequiresCleanRef.current = true;
-    if (saveInFlightRef.current) return saveInFlightRef.current;
+  const requestSave = useCallback(
+    (requireClean: boolean): Promise<boolean> => {
+      saveRequestRef.current += 1;
+      if (requireClean) saveRequiresCleanRef.current = true;
+      if (saveInFlightRef.current) return saveInFlightRef.current;
 
-    setSaving(true);
-    setError(null);
-    const operation = (async () => {
-      while (true) {
-        const handledRequest = saveRequestRef.current;
-        await waitForPendingImages();
-        cancelScheduledDraft();
-        const current = sessionRef.current;
-        if (!current || !isDirty(current)) return true;
-        const snapshot = createSaveSnapshot(current);
+      setSaving(true);
+      setError(null);
+      const operation = (async () => {
+        while (true) {
+          const handledRequest = saveRequestRef.current;
+          await waitForPendingImages();
+          cancelScheduledDraft();
+          const current = sessionRef.current;
+          if (!current || !isDirty(current)) return true;
+          const snapshot = createSaveSnapshot(current);
 
-        try {
-          await writeSnapshot(snapshot, snapshot.expectedRevision);
-        } catch (e) {
-          if (isAppError(e) && e.code === "external_modification_conflict") {
-            setModal({ kind: "conflict" });
+          try {
+            await writeSnapshot(snapshot, snapshot.expectedRevision);
+          } catch (e) {
+            if (isAppError(e) && e.code === "external_modification_conflict") {
+              setModal({ kind: "conflict" });
+              return false;
+            }
+            setError(errorMessage(e));
             return false;
           }
-          setError(errorMessage(e));
-          return false;
-        }
 
-        const latest = sessionRef.current;
-        const anotherSaveWasRequested =
-          saveRequestRef.current !== handledRequest;
-        const barrierStillDirty =
-          saveRequiresCleanRef.current && !!latest && isDirty(latest);
-        if (!anotherSaveWasRequested && !barrierStillDirty) return true;
-      }
-    })();
-    saveInFlightRef.current = operation;
-    void operation.finally(() => {
-      if (saveInFlightRef.current === operation) {
-        saveInFlightRef.current = null;
-        saveRequiresCleanRef.current = false;
-      }
-      setSaving(false);
-    });
-    return operation;
-  }, [cancelScheduledDraft, waitForPendingImages, writeSnapshot]);
+          const latest = sessionRef.current;
+          const anotherSaveWasRequested =
+            saveRequestRef.current !== handledRequest;
+          const barrierStillDirty =
+            saveRequiresCleanRef.current && !!latest && isDirty(latest);
+          if (!anotherSaveWasRequested && !barrierStillDirty) return true;
+        }
+      })();
+      saveInFlightRef.current = operation;
+      void operation.finally(() => {
+        if (saveInFlightRef.current === operation) {
+          saveInFlightRef.current = null;
+          saveRequiresCleanRef.current = false;
+        }
+        setSaving(false);
+      });
+      return operation;
+    },
+    [cancelScheduledDraft, waitForPendingImages, writeSnapshot],
+  );
 
   const handleSave = useCallback(() => {
     void requestSave(false);
   }, [requestSave]);
 
   /** 预览/发布的保存屏障：返回 true 时保证 pending 图片已完成且当前文章是 clean。 */
-  const ensureSaved = useCallback(
-    () => requestSave(true),
-    [requestSave],
-  );
+  const ensureSaved = useCallback(() => requestSave(true), [requestSave]);
 
   useEffect(() => {
     let disposed = false;
@@ -546,10 +539,7 @@ export default function App() {
           await enqueueDraftOperation(() =>
             api.deleteDraft(current.projectGeneration, current.id),
           );
-          await api.discardPendingImages(
-            current.projectGeneration,
-            current.id,
-          );
+          await api.discardPendingImages(current.projectGeneration, current.id);
         } catch {
           // 用户已明确选择放弃；退出时 Rust 仍会再次尽力清理 pending 图片。
         }
@@ -623,10 +613,7 @@ export default function App() {
       await waitForDraftQueue();
       const current = sessionRef.current;
       if (current) {
-        await api.discardPendingImages(
-          current.projectGeneration,
-          current.id,
-        );
+        await api.discardPendingImages(current.projectGeneration, current.id);
       }
       const id = ensureExtension(name, project.config.extensions);
       const fm = initialFrontmatter(project.config.frontmatter.fields, id);
@@ -764,7 +751,7 @@ export default function App() {
         setSettingsSaving(false);
       }
     },
-    [settingsSaving, refreshPosts, refreshGitStatus, refreshTags],
+    [settingsSaving, refreshPosts, refreshGitStatus, refreshTags, setProject],
   );
 
   const handleBodyChange = useCallback(
@@ -869,9 +856,7 @@ export default function App() {
           }}
           onCreatePost={(name) => guardDirty(() => void handleCreatePost(name))}
           onRenamePost={(oldId, newName) =>
-            guardDirty((fresh) =>
-              handleRenamePost(oldId, newName, fresh),
-            )
+            guardDirty((fresh) => handleRenamePost(oldId, newName, fresh))
           }
           onDeletePost={requestDeletePost}
         />
@@ -906,6 +891,7 @@ export default function App() {
             {project && (
               <button
                 type="button"
+                aria-haspopup="dialog"
                 onClick={() => {
                   setSettingsError(null);
                   setSettingsOpen(true);
@@ -1069,6 +1055,7 @@ export default function App() {
               onClick: saveAndClose,
             },
           ]}
+          onDismiss={() => setModal(null)}
         />
       )}
       {modal?.kind === "discard" && (
@@ -1086,10 +1073,7 @@ export default function App() {
                 void run(async () => {
                   await waitForPendingImages();
                   // 先确认磁盘文章仍可读取，避免清完图片后才发现无法恢复编辑会话。
-                  const fresh = await api.readPost(
-                    projectGeneration,
-                    postId,
-                  );
+                  const fresh = await api.readPost(projectGeneration, postId);
                   cancelScheduledDraft();
                   await waitForDraftQueue();
                   await api.discardPendingImages(projectGeneration, postId);
@@ -1102,6 +1086,7 @@ export default function App() {
               },
             },
           ]}
+          onDismiss={() => setModal(null)}
         />
       )}
       {modal?.kind === "delete" && (
@@ -1121,6 +1106,7 @@ export default function App() {
               onClick: confirmDeletePost,
             },
           ]}
+          onDismiss={() => setModal(null)}
         />
       )}
     </div>
@@ -1139,7 +1125,11 @@ function ensureExtension(name: string, extensions: string[]): string {
 /** 按配置字段生成新文章的初始 frontmatter */
 function initialFrontmatter(fields: FieldSpec[], id: string): string | null {
   const fm = FrontmatterDocument.empty();
-  const stem = id.split("/").pop()?.replace(/\.[^.]+$/, "") ?? id;
+  const stem =
+    id
+      .split("/")
+      .pop()
+      ?.replace(/\.[^.]+$/, "") ?? id;
   for (const field of fields) {
     if (field.type === "string" && field.name === "title") {
       fm.set(field.name, stem);

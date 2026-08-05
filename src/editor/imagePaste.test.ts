@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { EditorState } from "@codemirror/state";
+import { describe, expect, it } from "vitest";
 import {
   extractDroppedImages,
   extractPastedImages,
@@ -37,9 +37,7 @@ describe("extractPastedImages", () => {
     const pasted = file("clipboard.png", "image/png");
     const duplicate = file("clipboard.png", "image/png");
     expect(
-      extractPastedImages(
-        transfer([item("image/png", pasted)], [duplicate]),
-      ),
+      extractPastedImages(transfer([item("image/png", pasted)], [duplicate])),
     ).toEqual([pasted]);
   });
 
@@ -80,8 +78,12 @@ describe("isPasteShortcut", () => {
   });
 
   it("不拦截 Alt 组合、按键长按或普通 V", () => {
-    expect(isPasteShortcut(keyboard({ ctrlKey: true, altKey: true }))).toBe(false);
-    expect(isPasteShortcut(keyboard({ ctrlKey: true, repeat: true }))).toBe(false);
+    expect(isPasteShortcut(keyboard({ ctrlKey: true, altKey: true }))).toBe(
+      false,
+    );
+    expect(isPasteShortcut(keyboard({ ctrlKey: true, repeat: true }))).toBe(
+      false,
+    );
     expect(isPasteShortcut(keyboard({}))).toBe(false);
   });
 });
@@ -94,9 +96,7 @@ describe("needsNativeClipboardFallback", () => {
 
   it("图片类型存在但 WebKit 拿不到 File 时启用原生剪贴板", () => {
     expect(
-      needsNativeClipboardFallback(
-        transfer([item("image/png", null)]),
-      ),
+      needsNativeClipboardFallback(transfer([item("image/png", null)])),
     ).toBe(true);
   });
 
